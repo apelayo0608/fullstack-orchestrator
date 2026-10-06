@@ -16,7 +16,7 @@
     "fullstack-orchestrator": "scripts/install.sh"
   },
   "scripts": {
-    "install": "if [ \"$INIT_CWD\" = \"$PWD\" ]; then bash scripts/install.sh install; fi",
+    "install": "if [ -n \"$INIT_CWD\" ] && [ \"$INIT_CWD\" = \"$PWD\" ] && [ -f scripts/install.sh ]; then bash scripts/install.sh install; fi",
     "setup": "bash scripts/install.sh install",
     "setup:copy": "bash scripts/install.sh install --copy",
     "uninstall-skill": "bash scripts/install.sh uninstall",
