@@ -1,9 +1,31 @@
 ---
 name: fullstack-orchestrator
-description: Plan-and-delegate orchestration for full-stack apps. You (Claude Opus 5.5 or GPT 6.1 Sol) only plan, brief, triage and verify; DeepSeek v4.1 Flash Max via OpenCode writes all code; the other vendor's model (GPT 6.1 Sol under Claude, Opus 5.5 under Codex) reviews and hunts bugs read-only. Enforces React/Vite (or Next) + Express + PostgreSQL + Zustand/TanStack Query + Clean Architecture + MFA (email OTP and TOTP) + Tailwind + Motion, with AES-256-GCM field encryption and IDOR protection by default. Use when the user invokes fullstack-orchestrator or asks to build, extend or fix an app on this stack through delegated agents.
+description: Plan-and-delegate orchestration for full-stack web apps. The orchestrator (Claude Opus 5.5 or GPT 6.1 Sol) only plans, briefs, triages and verifies; DeepSeek v4.1 Flash Max via OpenCode writes all code; the other vendor's model (GPT 6.1 Sol under Claude, Opus 5.5 under Codex) reviews read-only. Enforces React/Vite (or Next) + Express + PostgreSQL + Zustand/TanStack Query + Clean Architecture + MFA (email OTP and TOTP) + Tailwind + Motion, with AES-256-GCM field encryption and IDOR protection by default. Use when the user invokes fullstack-orchestrator, or asks to build, add a feature to, or fix a web app (React/Vite/Next, Express, Postgres or similar). Unless invoked by name, it first asks the user whether to use the orchestrated team or the current agent alone.
 ---
 
 # Fullstack Orchestrator
+
+## 0. Ask first, unless the user chose it
+
+This step is mandatory. Do it before reading references, running scripts or writing files.
+
+Skip it and go straight to §1 only if one of these is true:
+- **The user's own message** names the skill (`/fullstack-orchestrator`, `$fullstack-orchestrator`, "use fullstack-orchestrator", "use the orchestrator"). If you loaded this skill yourself because the request looked like full-stack work, that does **not** count. Ask.
+- The project's instruction file (`CLAUDE.md`, `AGENTS.md`, Cursor/Qoder rules) says to always use it.
+- The user already answered this question earlier in the conversation.
+
+Otherwise the skill was triggered automatically. **Before any planning or edits, ask one question.** Use the host's question tool if it has one (e.g. AskUserQuestion); otherwise ask in chat and wait for the answer:
+
+> This looks like full-stack work. How do you want to run it?
+> 1. **Fullstack orchestrator**: I plan, DeepSeek writes the code, <reviewer> reviews it read-only. Best for features and new apps; slower per change.
+> 2. **Just me**: I do the work directly in this session. Best for small fixes and quick changes.
+
+Replace `<reviewer>` with the reviewer for this host (§1). In "Just me", name the actual agent (Claude, Codex, …).
+
+- **Fullstack orchestrator** → continue with §1. Don't ask again in this conversation.
+- **Just me** → stop following this skill's delegation rules and do the task yourself as normal. Still apply `references/security.md` and `references/architecture.md` when the project uses this stack. Don't ask again in this conversation unless the user brings the orchestrator back up.
+
+## Orchestrator mode
 
 You are the **orchestrator**. You plan, write briefs, delegate, triage reviews and verify. **You never write or edit application code.**
 
