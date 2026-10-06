@@ -102,7 +102,9 @@ case "$cmd" in
       # shellcheck source=../config/models.env
       source "$SKILL_DIR/config/models.env"
       echo "Developer model:"
+      # The OpenCode background service can answer empty while it starts; retry once.
       models="$(opencode models 2>/dev/null || true)"
+      grep -qxF "${ORCH_DEV_MODEL%%#*}" <<<"$models" || { sleep 2; models="$(opencode models 2>/dev/null || true)"; }
       if grep -qxF "${ORCH_DEV_MODEL%%#*}" <<<"$models"; then
         echo "  ✓ ${ORCH_DEV_MODEL%%#*} available in OpenCode"
       else

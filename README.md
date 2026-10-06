@@ -18,18 +18,18 @@ npm install -g github:apelayo0608/fullstack-orchestrator
 ```bash
 fullstack-orchestrator install
 ```
-Re-run the first command to update.
+To update, re-run the first command. The skill links keep pointing at the updated files.
 
 From a local clone of this folder:
 
 ```bash
-npm install
+npm run setup
 ```
 That links the skill into `~/.claude/skills` and `~/.codex/skills`. Other commands:
 
 | Command | What it does |
 |---|---|
-| `npm run install` | Same as `npm install`; safe to re-run |
+| `npm run setup` | Install or re-link; safe to re-run |
 | `npm run setup:copy` | Copy instead of symlink (re-run after every update) |
 | `npm run doctor` | Check CLIs, links and the DeepSeek model |
 | `npm run uninstall-skill` | Remove the skill from both hosts |
