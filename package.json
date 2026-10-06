@@ -8,12 +8,16 @@
     "url": "git+https://github.com/apelayo0608/fullstack-orchestrator.git"
   },
   "license": "UNLICENSED",
-  "os": ["darwin", "linux"],
+  "os": [
+    "darwin",
+    "linux"
+  ],
   "bin": {
     "fullstack-orchestrator": "scripts/install.sh"
   },
   "scripts": {
-    "install": "bash scripts/install.sh install",
+    "install": "if [ \"$INIT_CWD\" = \"$PWD\" ]; then bash scripts/install.sh install; fi",
+    "setup": "bash scripts/install.sh install",
     "setup:copy": "bash scripts/install.sh install --copy",
     "uninstall-skill": "bash scripts/install.sh uninstall",
     "doctor": "bash scripts/install.sh doctor"
