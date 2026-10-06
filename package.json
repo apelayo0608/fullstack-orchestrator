@@ -1,0 +1,30 @@
+{
+  "name": "fullstack-orchestrator",
+  "version": "1.0.0",
+  "description": "Claude Code + Codex skill: plan-and-delegate orchestration with DeepSeek (OpenCode) as developer and a cross-vendor read-only reviewer.",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/apelayo0608/fullstack-orchestrator.git"
+  },
+  "license": "UNLICENSED",
+  "os": ["darwin", "linux"],
+  "bin": {
+    "fullstack-orchestrator": "scripts/install.sh"
+  },
+  "scripts": {
+    "install": "bash scripts/install.sh install",
+    "setup:copy": "bash scripts/install.sh install --copy",
+    "uninstall-skill": "bash scripts/install.sh uninstall",
+    "doctor": "bash scripts/install.sh doctor"
+  },
+  "files": [
+    "SKILL.md",
+    "README.md",
+    "agents",
+    "config",
+    "references",
+    "scripts",
+    "templates"
+  ]
+}

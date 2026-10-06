@@ -1,0 +1,21 @@
+@import "tailwindcss";
+
+/* Class-based dark mode, driven by useUiStore().theme on <html>. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+  --color-brand-50: oklch(0.97 0.02 265);
+  --color-brand-500: oklch(0.6 0.19 265);
+  --color-brand-600: oklch(0.53 0.2 265);
+  --color-brand-700: oklch(0.46 0.19 265);
+  --ease-snappy: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
