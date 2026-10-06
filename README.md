@@ -43,6 +43,8 @@ fullstack-orchestrator install
 ```
 npm blocks install scripts on global installs, so run `fullstack-orchestrator install` once yourself. After that you can use `fullstack-orchestrator doctor` and `fullstack-orchestrator uninstall`. Run `uninstall` before `npm uninstall -g fullstack-orchestrator`, because npm doesn't run uninstall hooks.
 
+**Cursor and Qoder** read the same `SKILL.md` format from `~/.cursor/skills` and `~/.qoder/skills`. The installer links into those too when `~/.cursor` or `~/.qoder` exists. To limit which tools get it, use `fullstack-orchestrator install --only=cursor,qoder` or `npm run setup -- --only=...`. In those tools the skill picks the reviewer from the orchestrator's model: Claude → GPT reviews, GPT → Opus reviews.
+
 Requirements: `opencode` (logged in to the `opencode-go` provider), `codex`, `claude`, `git`, `perl`, and `shasum` on PATH.
 
 ## Launch

@@ -18,6 +18,13 @@ Run `scripts/detect-host.sh`. You also know which agent you are. If detection fa
 | **Claude Code** (`--host claude`) | Claude Opus 5.5, effort high | DeepSeek v4.1 Flash, variant max, via OpenCode | GPT 6.1 Sol, effort medium, via `codex exec -s read-only` |
 | **Codex** (`--host codex`) | GPT 6.1 Sol, effort high | DeepSeek v4.1 Flash, variant max, via OpenCode | Claude Opus 5.5, effort medium, via `claude -p` with edit tools denied |
 
+**Other tools (Cursor, Qoder, …):** `detect-host.sh` can't identify them, so choose `--host` by the model *you* are running as. The reviewer is always the other vendor:
+- A Claude model → `--host claude` (GPT reviews).
+- A GPT model → `--host codex` (Opus reviews).
+- Any other model → ask the user which reviewer to use.
+
+The scripts are plain shell, so they run in any agent that has a terminal. If that agent's sandbox blocks network access, the user must allow the delegate scripts to run outside it.
+
 Model ids live in `config/models.env`. Change them there, not here.
 
 If your own session is not running the orchestrator model and effort above, tell the user once and suggest a relaunch, then continue if they say so:
