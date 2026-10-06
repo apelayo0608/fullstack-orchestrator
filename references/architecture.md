@@ -78,9 +78,11 @@ The `@/` import alias is set in `vite.config.ts` (`resolve.alias`) and in tsconf
 `server.proxy['/api'] → http://localhost:4000`. The browser only talks to `:5173`, so the session cookie is first-party, no CORS is needed in dev, and the client always calls relative `/api/...`. In production, a reverse proxy (nginx, Caddy, platform routing) serves the SPA and forwards `/api` to Express on the same origin.
 
 ### 4.2 State: TanStack Query vs Zustand
-- **TanStack Query owns all server state:** fetching, caching, mutations, optimistic updates, invalidation. Use query key factories (`queryKeys.notes.detail(id)`). After a mutation, invalidate the feature's `all` key or update the cache precisely.
+- **TanStack Query owns all server state:** fetching, caching, mutations, optimistic updates, invalidation. Each feature keeps its key factory next to its hooks (`notesKeys.detail(id)` in `features/notes/use-notes.ts`). After a mutation, invalidate the feature's `all` or `list` key, or update the cache precisely.
 - **Zustand owns client-only UI state:** theme, sidebar, modal open state, multi-step form drafts. Never copy server data into Zustand, and never store tokens, secrets or PII there.
-- Templates: `shared/lib/query-client.ts`, `shared/stores/ui-store.ts`, `features/auth/*`.
+- Templates: `shared/lib/query-client.ts`, `shared/stores/ui-store.ts`, `features/auth/*`, `features/notes/use-notes.ts` (CRUD hooks).
+
+New user-owned CRUD resources start from `scripts/scaffold-resource.sh --name <singular>`, which generates the whole notes slice (domain, use cases, repository, routes, IDOR tests, migration, hooks) under the new name.
 
 ### 4.3 API client (`templates/client/src/shared/lib/api-client.ts`)
 `fetch('/api' + path)` with `credentials: 'same-origin'`, JSON in and out, a typed `ApiError` (status, code, issues), and a global 401 handler that clears the query cache and routes to login.

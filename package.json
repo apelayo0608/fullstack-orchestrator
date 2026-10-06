@@ -1,6 +1,6 @@
 {
   "name": "fullstack-orchestrator",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Claude Code + Codex skill: plan-and-delegate orchestration with DeepSeek (OpenCode) as developer and a cross-vendor read-only reviewer.",
   "private": true,
   "repository": {

@@ -12,13 +12,11 @@ export const queryClient = new QueryClient({
   },
 });
 
-/** One factory per feature keeps invalidation precise: invalidate notes.all after any note mutation. */
-const notesAll = ['notes'] as const;
+/**
+ * App-wide keys. Each feature keeps its own key factory next to its hooks
+ * (e.g. notesKeys in features/notes/use-notes.ts) and invalidates its `all` key
+ * after any of its mutations.
+ */
 export const queryKeys = {
   me: ['me'] as const,
-  notes: {
-    all: notesAll,
-    list: () => [...notesAll, 'list'] as const,
-    detail: (id: string) => [...notesAll, 'detail', id] as const,
-  },
 };

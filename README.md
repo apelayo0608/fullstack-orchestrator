@@ -4,8 +4,8 @@ A shared skill for **Claude Code** and **Codex**. It turns the host into a plan-
 
 | Host | Orchestrator | Developer | Reviewer (read-only) |
 |---|---|---|---|
-| Claude Code | Opus 5.5 · high | DeepSeek v4.1 Flash · max (OpenCode) | GPT 6.1 Sol · medium (`codex exec -s read-only`) |
-| Codex | GPT 6.1 Sol · high | DeepSeek v4.1 Flash · max (OpenCode) | Opus 5.5 · medium (`claude -p`, edit tools denied) |
+| Claude Code | Opus 5.5 · medium | DeepSeek v4.1 Flash · max (OpenCode) | GPT 6.1 Sol · medium (`codex exec -s read-only`) |
+| Codex | GPT 6.1 Sol · medium | DeepSeek v4.1 Flash · max (OpenCode) | Opus 5.5 · medium (`claude -p`, edit tools denied) |
 
 Default stack and security rules: React/Vite (or Next) · Express 5 · PostgreSQL · Vite proxy · Zustand + TanStack Query · Clean Architecture · MFA (email OTP + TOTP) · Tailwind v4 · Motion. The rules are AES-256-GCM field encryption and IDOR protection (owner-scoped data access) by default.
 
@@ -50,10 +50,10 @@ Requirements: `opencode` (logged in to the `opencode-go` provider), `codex`, `cl
 ## Launch
 
 ```bash
-claude --model claude-opus-5-5 --effort high
+claude --model claude-opus-5-5 --effort medium
 ```
 ```bash
-codex -m gpt-6.1-sol -c model_reasoning_effort="high"
+codex -m gpt-6.1-sol -c model_reasoning_effort="medium"
 ```
 Then ask for the work, or invoke it explicitly: `/fullstack-orchestrator …` in Claude Code, `$fullstack-orchestrator …` in Codex.
 
@@ -77,7 +77,22 @@ Edit `config/models.env`, or export a variable for one session, e.g. `ORCH_DEV_M
 ```
 - The orchestrator writes `plan.md` and the briefs.
 - `delegate-dev.sh` runs DeepSeek in a stable OpenCode session per task (`ses_orch_<repohash>_<task>`), so fix rounds keep context.
-- `delegate-review.sh` diffs the task against its baseline, runs the reviewer, and fails with exit 3 if the reviewer changed any non-ignored file.
+- After each developer run, `check.sh` runs static security rules on the added lines plus the plan's test command, and failures go straight back to DeepSeek (up to `ORCH_MAX_CHECK_FIXES`).
+- `delegate-review.sh` refuses to review work that fails the checks, scales the review to the task's risk (`high` / `low` / `none` in `plan.md`), reviews the whole task diff in round 1 and only the changes since the last round after that, and fails with exit 3 if the reviewer changed any non-ignored file.
+- `task-worktree.sh` gives independent tasks their own git worktrees so they can be developed and reviewed in parallel, then lands each one back into the main working tree.
+- `scaffold-resource.sh` (run by the developer) generates a full owner-scoped CRUD slice from the notes templates.
+
+## Speed settings
+
+All in `config/models.env` (or exported per session):
+
+| Variable | Default | Effect |
+|---|---|---|
+| `ORCH_MAX_CHECK_FIXES` | 2 | Automatic check-failure round trips to DeepSeek before the orchestrator steps in |
+| `ORCH_MAX_FIX_ROUNDS` | 2 | Review fix rounds before escalating to you |
+| `ORCH_REVIEW_EFFORT_LOW_ON_*` | low | Reviewer effort for `risk: low` tasks |
+| `ORCH_CHECK_CMD` | (plan.md) | Test command for the checks |
+| `ORCH_WORKTREE_ROOT` / `ORCH_WORKTREE_SETUP` | sibling folder / lockfile install | Where task worktrees go and how they get dependencies |
 
 ## Layout
 
@@ -85,9 +100,11 @@ Edit `config/models.env`, or export a variable for one session, e.g. `ORCH_DEV_M
 SKILL.md               orchestrator instructions (both hosts)
 agents/openai.yaml     Codex UI metadata
 config/models.env      model routing
-scripts/               detect-host.sh, delegate-dev.sh, delegate-review.sh, lib.sh
+scripts/               detect-host.sh, delegate-dev.sh, delegate-review.sh, check.sh,
+                       task-worktree.sh, scaffold-resource.sh, lib.sh
 references/            workflow.md, security.md, architecture.md
 templates/server/      crypto (AES-GCM, key ring, blind index, TOTP, OTP), owner-scoped repo + use cases,
                        auth/MFA services, middleware, routes, app, SQL migration, IDOR test suite
-templates/client/      vite.config.ts, api client, query client, Zustand UI store, auth hooks, Motion, Tailwind CSS
+templates/client/      vite.config.ts, api client, query client, Zustand UI store, auth hooks, notes CRUD hooks,
+                       Motion, Tailwind CSS
 ```
