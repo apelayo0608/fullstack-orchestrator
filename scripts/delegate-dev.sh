@@ -1,27 +1,31 @@
 #!/usr/bin/env bash
 # Hand one task brief to the full-stack developer (DeepSeek through OpenCode).
 #
-# Usage: delegate-dev.sh --task T01 [--brief PATH] [--repo DIR] [--new-session] [--dry-run]
+# Usage: delegate-dev.sh --task T01 [--brief PATH] [--repo DIR] [--new-session] [--watch] [--dry-run]
 #
 #   --task         Task id, e.g. T01. The brief defaults to .orchestrator/tasks/<task>.md.
 #   --brief        Brief to send instead, e.g. .orchestrator/tasks/T01-fix1.md for a fix round.
 #   --repo         Any path inside the target git repo (default: current directory).
 #   --new-session  Start a fresh OpenCode session instead of continuing this task's session.
+#   --watch        Open a Terminal.app window (macOS) with the OpenCode TUI on this task's
+#                  session, so you can watch the developer live. Typing there steers it.
 #   --dry-run      Print the command and prompt location without running anything.
 #
 # The first run of a task records a baseline snapshot of the working tree so
 # delegate-review.sh can diff the whole task. Full output: .orchestrator/logs/.
 # Runs can take many minutes: run this in the background or with a long timeout.
+# The "Watch live:" line on stderr is the command that opens the same live view anywhere.
 set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/lib.sh"
 
-task="" brief="" repo="." new_session=0 dry_run=0
+task="" brief="" repo="." new_session=0 watch=0 dry_run=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --task) task=${2:?}; shift 2 ;;
     --brief) brief=${2:?}; shift 2 ;;
     --repo) repo=${2:?}; shift 2 ;;
     --new-session) new_session=1; shift ;;
+    --watch) watch=1; shift ;;
     --dry-run) dry_run=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) die "unknown argument: $1 (see --help)" ;;
@@ -47,6 +51,8 @@ ts="$(date +%Y%m%d-%H%M%S)"
 prompt_file="$orch/logs/$task-dev-$ts.prompt.md"
 log="$orch/logs/$task-dev-$ts.log"
 cmd=(opencode run -m "$ORCH_DEV_MODEL" --auto -s "$session" --title "orch $task")
+# The TUI attaches to the same background service as `opencode run`, so it shows the run live.
+watch_cmd="cd $(printf %q "$repo") && opencode -s $(printf %q "$session")"
 
 if (( dry_run )); then
   echo "repo:    $repo"
@@ -54,6 +60,7 @@ if (( dry_run )); then
   echo "session: $session"
   echo "command: (cd $repo && ${cmd[*]} \"<contract + brief>\")"
   echo "log:     $log"
+  echo "watch:   $watch_cmd"
   exit 0
 fi
 
@@ -105,6 +112,19 @@ $(cat "$brief")
 EOF
 
 echo "Delegating $task to $ORCH_DEV_MODEL (session $session)..." >&2
+echo "Watch live: $watch_cmd" >&2
+if (( watch )); then
+  if [[ $(uname) == Darwin ]] && command -v osascript >/dev/null 2>&1; then
+    # Open after the run has started so it creates the session with its title.
+    ( sleep 3
+      osascript -e 'on run argv' -e 'tell application "Terminal" to do script (item 1 of argv)' \
+        -e 'tell application "Terminal" to activate' -e 'end run' "$watch_cmd" >/dev/null 2>&1 \
+        || echo "warning: could not open the watch window; run the Watch live command yourself" >&2
+    ) &
+  else
+    echo "warning: --watch needs macOS Terminal; run the Watch live command yourself" >&2
+  fi
+fi
 set +e
 (cd "$repo" && "${cmd[@]}" "$(cat "$prompt_file")") 2>&1 | strip_ansi > "$log"
 status=${PIPESTATUS[0]}

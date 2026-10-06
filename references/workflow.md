@@ -80,6 +80,13 @@ DeepSeek sees only the brief plus the standing contract that `delegate-dev.sh` p
 ```
 Runs can take many minutes. In Claude Code, run it with `run_in_background` and wait for the completion notice. In Codex, request escalated permissions and use a long timeout. When it finishes, read the printed `DEV REPORT` and `git status`.
 
+**Live view.** Let the user watch DeepSeek work. The OpenCode TUI attaches to the same background service as the run:
+- Claude desktop app (terminal-panel tools available): right after starting the background run, open a terminal tab in the panel and run the `watch` command that `delegate-dev.sh --task T02 --dry-run` prints (`cd <repo> && opencode -s <session>`). Reuse that tab for fix rounds of the same task.
+- Anywhere else on macOS: add `--watch`; the script opens a Terminal.app window with the TUI.
+- Otherwise: tell the user the `Watch live:` command the script prints on stderr.
+
+Tell the user that typing in the live view sends messages into the developer's session. You do not need the view yourself; you still read the `DEV REPORT`.
+
 - `Status: blocked` or open questions → answer them in a fix brief (or ask the user if it is their call), then re-delegate.
 - Never patch the code yourself, even for one line.
 

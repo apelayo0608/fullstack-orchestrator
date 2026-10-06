@@ -70,7 +70,7 @@ Read `references/workflow.md` before the first task. It holds the plan, brief an
 
 1. **Plan.** Explore the repo, then write `.orchestrator/plan.md` as small vertical tasks (T01, T02, …). Each task has acceptance criteria and its security requirements. Show the plan to the user first when the scope is new or large.
 2. **Brief.** Write `.orchestrator/tasks/Txx.md`: goal, context files, which `templates/` to start from, requirements, security requirements, acceptance criteria, out of scope.
-3. **Develop.** Run `scripts/delegate-dev.sh --task Txx`. It can run for many minutes: background it in Claude Code, or give it a long timeout in Codex. Read the `DEV REPORT` it prints.
+3. **Develop.** Run `scripts/delegate-dev.sh --task Txx`. It can run for many minutes: background it in Claude Code, or give it a long timeout in Codex. Open the live view for the user (see `references/workflow.md` §3). Read the `DEV REPORT` it prints.
 4. **Review.** Run `scripts/delegate-review.sh --task Txx --host <claude|codex>`. Read the verdict and findings.
 5. **Triage.** You judge each finding. Valid BLOCKER and MAJOR findings go into `.orchestrator/tasks/Txx-fixN.md`. Reject invalid ones with a one-line reason in `plan.md`. Then:
    - `scripts/delegate-dev.sh --task Txx --brief .orchestrator/tasks/Txx-fixN.md` (same developer session).
@@ -111,7 +111,7 @@ Defaults to state in every brief that touches them:
 
 | Path | Purpose |
 |---|---|
-| `scripts/delegate-dev.sh` | Brief → DeepSeek in a per-task OpenCode session; records the task baseline; prints the DEV REPORT |
+| `scripts/delegate-dev.sh` | Brief → DeepSeek in a per-task OpenCode session; records the task baseline; prints the DEV REPORT; `--watch` opens a live OpenCode TUI |
 | `scripts/delegate-review.sh` | Task diff → cross-vendor reviewer, read-only, with a before/after working-tree guard |
 | `scripts/detect-host.sh` | Prints `claude` or `codex` (override with `ORCH_HOST`) |
 | `config/models.env` | Model ids, efforts, max fix rounds |
