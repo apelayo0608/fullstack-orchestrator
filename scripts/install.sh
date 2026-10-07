@@ -11,6 +11,7 @@
 #   uninstall   Remove those links/copies (only if they are this skill).
 #   doctor      Check the CLIs, models and links the skill needs.
 #   --copy      Copy files instead of symlinking (re-run install after every update).
+#               This is the default on Windows (Git Bash / MSYS).
 #   --only=...  Comma-separated tools to touch (also: --claude-only, --codex-only).
 #
 # Honors CLAUDE_CONFIG_DIR and CODEX_HOME when set.
@@ -35,6 +36,8 @@ hosts=(claude codex)
 all_hosts=("${hosts[@]}")
 
 cmd=install copy=0
+# Symlinks need elevated rights on Windows, so Git Bash/MSYS installs copy by default.
+case "$(uname -s)" in MINGW*|MSYS*) copy=1 ;; esac
 for arg in "$@"; do
   case "$arg" in
     install|uninstall|doctor) cmd=$arg ;;

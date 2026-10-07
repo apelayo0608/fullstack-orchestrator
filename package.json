@@ -10,7 +10,8 @@
   "license": "UNLICENSED",
   "os": [
     "darwin",
-    "linux"
+    "linux",
+    "win32"
   ],
   "bin": {
     "fullstack-orchestrator": "scripts/install.sh"
