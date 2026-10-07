@@ -4,8 +4,10 @@ A shared skill for **Claude Code** and **Codex**. It turns the host into a plan-
 
 | Host | Orchestrator | Developer | Reviewer (read-only) |
 |---|---|---|---|
-| Claude Code | Opus 5.5 · medium | DeepSeek v4.1 Flash · max (OpenCode) | GPT 6.1 Sol · medium (`codex exec -s read-only`) |
-| Codex | GPT 6.1 Sol · medium | DeepSeek v4.1 Flash · max (OpenCode) | Opus 5.5 · medium (`claude -p`, edit tools denied) |
+| Claude Code | Opus 5.5 · medium | configurable (default OpenCode) · high, max for risk-high tasks | GPT 6.1 Sol · medium (`codex exec -s read-only`) |
+| Codex | GPT 6.1 Sol · medium | same | Opus 5.5 · medium (`claude -p`, edit tools denied) |
+
+Every role's **provider, model and thinking level** can be changed (see [Swap models](#swap-models)). Developer and reviewer providers can be `opencode`, `claude` or `codex`.
 
 Default stack and security rules: React/Vite (or Next) · Express 5 · PostgreSQL · Vite proxy · Zustand + TanStack Query · Clean Architecture · MFA (email OTP + TOTP) · Tailwind v4 · Motion. The rules are AES-256-GCM field encryption and IDOR protection (owner-scoped data access) by default.
 
@@ -31,7 +33,7 @@ That links the skill into `~/.claude/skills` and `~/.codex/skills`. Other comman
 |---|---|
 | `npm run setup` | Install or re-link; safe to re-run |
 | `npm run setup:copy` | Copy instead of symlink (re-run after every update) |
-| `npm run doctor` | Check CLIs, links and the DeepSeek model |
+| `npm run doctor` | Check CLIs, links and the developer model |
 | `npm run uninstall-skill` | Remove the skill from both hosts |
 
 Optional global command, usable from anywhere:
@@ -68,15 +70,28 @@ prefix_rule(pattern=["/Users/adrian/.codex/skills/fullstack-orchestrator/scripts
 ## Swap models
 
 ```bash
-fullstack-orchestrator models                 # show orchestrator, developer and reviewer models
-fullstack-orchestrator models setup           # interactive; Enter keeps a value
-fullstack-orchestrator models set dev        # pick provider, then model, then thinking level
-fullstack-orchestrator models set dev opencode-go/deepseek-v4-pro#max
-fullstack-orchestrator models set review-on-claude gpt-6.1-sol
-fullstack-orchestrator models set review-on-claude-effort high
+fullstack-orchestrator models                 # show provider, model and thinking of every role
+fullstack-orchestrator models setup           # interactive for every role; Enter keeps a value
+fullstack-orchestrator models set dev         # pick provider, then model, then thinking level
+fullstack-orchestrator models set review      # same for the reviewer ("auto" = the other vendor of the host)
+fullstack-orchestrator models set dev-runner claude       # provider: opencode | claude | codex
+fullstack-orchestrator models set dev opencode-go/deepseek-v4-pro
+fullstack-orchestrator models set dev-effort medium       # risk low/none tasks
+fullstack-orchestrator models set dev-effort-high-risk max
+fullstack-orchestrator models set review-runner opencode  # force a provider (needs `review <model>`)
+fullstack-orchestrator models set review-effort high
+fullstack-orchestrator models set review-effort-delta low # later review rounds
+fullstack-orchestrator models set orch-claude-effort high
 fullstack-orchestrator models reset [role]    # back to the defaults
 ```
-Roles: `dev`, `orch-claude`, `orch-codex`, `review-on-claude`, `review-on-codex` (add `-effort` for effort, except `dev`, whose effort is the `#variant`). Choices are saved to `~/.config/fullstack-orchestrator/models.env`, so reinstalling does not lose them. `set dev` warns when OpenCode does not list the model. The orchestrator is your host session: launch it with the model `models` prints. To override once, export a variable, e.g. `ORCH_DEV_MODEL=... claude`. Defaults live in `config/models.env`; change them there only for the repo itself.
+
+| Role | Provider | Model | Thinking |
+|---|---|---|---|
+| Developer | `dev-runner` (opencode, claude, codex) | `dev` | `dev-effort`, `dev-effort-high-risk` (a `#variant` on the model id pins it for all tasks) |
+| Reviewer | `review-runner` (auto, opencode, claude, codex) | `review` (empty = per-host default) | `review-effort`, `review-effort-low`, `review-effort-delta` |
+| Orchestrator | the host: Claude Code or Codex | `orch-claude`, `orch-codex` | `orch-claude-effort`, `orch-codex-effort` |
+
+Per-host reviewer defaults used while the runner is `auto` and `review` is empty: `review-on-claude`, `review-on-codex` (and their `-effort`, `-effort-low`). Choices are saved to `~/.config/fullstack-orchestrator/models.env`, so reinstalling does not lose them. `set dev` warns when OpenCode does not list the model. The `codex` developer has no resumable session, so it gets the full contract on every run; `claude` and `opencode` resume and get a short prompt on fix rounds. The orchestrator is your host session: launch it with the model `models` prints. To override once, export a variable, e.g. `ORCH_DEV_MODEL=... claude`. Defaults live in `config/models.env`; change them there only for the repo itself.
 
 ## What happens in a project
 
@@ -85,8 +100,8 @@ Roles: `dev`, `orch-claude`, `orch-codex`, `review-on-claude`, `review-on-codex`
   plan.md  tasks/  baselines/  sessions/  reviews/  logs/
 ```
 - The orchestrator writes `plan.md` and the briefs.
-- `delegate-dev.sh` runs DeepSeek in a stable OpenCode session per task (`ses_orch_<repohash>_<task>`), so fix rounds keep context.
-- After each developer run, `check.sh` runs static security rules on the added lines plus the plan's test command, and failures go straight back to DeepSeek (up to `ORCH_MAX_CHECK_FIXES`).
+- `delegate-dev.sh` runs the developer in a stable session per task (`ses_orch_<repohash>_<task>` for OpenCode), so fix rounds keep context and get a short prompt.
+- After each developer run, `check.sh` runs static security rules on the added lines plus the plan's test command, static findings are reported before the tests run, an unchanged tree reuses a passing result, and failures go straight back to the developer (up to `ORCH_MAX_CHECK_FIXES`).
 - `delegate-review.sh` refuses to review work that fails the checks, scales the review to the task's risk (`high` / `low` / `none` in `plan.md`), reviews the whole task diff in round 1 and only the changes since the last round after that, and fails with exit 3 if the reviewer changed any non-ignored file.
 - `task-worktree.sh` gives independent tasks their own git worktrees so they can be developed and reviewed in parallel, then lands each one back into the main working tree.
 - `scaffold-resource.sh` (run by the developer) generates a full owner-scoped CRUD slice from the notes templates.
@@ -97,9 +112,12 @@ All in `config/models.env` (or exported per session):
 
 | Variable | Default | Effect |
 |---|---|---|
-| `ORCH_MAX_CHECK_FIXES` | 2 | Automatic check-failure round trips to DeepSeek before the orchestrator steps in |
-| `ORCH_MAX_FIX_ROUNDS` | 2 | Review fix rounds before escalating to you |
-| `ORCH_REVIEW_EFFORT_LOW_ON_*` | low | Reviewer effort for `risk: low` tasks |
+| `ORCH_DEV_EFFORT` / `ORCH_DEV_EFFORT_HIGH_RISK` | high / max | Developer thinking level; max only where the risk is high |
+| `ORCH_MAX_CHECK_FIXES` | 2 | Automatic check-failure round trips to the developer before the orchestrator steps in |
+| `ORCH_MAX_FIX_ROUNDS` | 1 | Review fix rounds before escalating to you |
+| `ORCH_REVIEW_EFFORT_DELTA` | low | Reviewer effort for rounds after the first (fix verification) |
+| `ORCH_REVIEW_EFFORT_LOW` | per-host (low) | Reviewer effort for `risk: low` tasks |
+| `ORCH_SKIP_REVIEW_LINES` | 100 | `risk: low` tasks with fewer changed lines skip model review (0 disables) |
 | `ORCH_CHECK_CMD` | (plan.md) | Test command for the checks |
 | `ORCH_WORKTREE_ROOT` / `ORCH_WORKTREE_SETUP` | sibling folder / lockfile install | Where task worktrees go and how they get dependencies |
 

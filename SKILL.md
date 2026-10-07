@@ -1,6 +1,6 @@
 ---
 name: fullstack-orchestrator
-description: Plan-and-delegate orchestration for full-stack web apps. The orchestrator (Claude Opus 5.5 or GPT 6.1 Sol) only plans, briefs, triages and verifies; DeepSeek v4.1 Flash Max via OpenCode writes all code; the other vendor's model (GPT 6.1 Sol under Claude, Opus 5.5 under Codex) reviews read-only. Enforces React/Vite (or Next) + Express + PostgreSQL + Zustand/TanStack Query + Clean Architecture + MFA (email OTP and TOTP) + Tailwind + Motion, with AES-256-GCM field encryption and IDOR protection by default. Use when the user invokes fullstack-orchestrator, or asks to build, add a feature to, or fix a web app (React/Vite/Next, Express, Postgres or similar). Unless invoked by name, it first asks the user whether to use the orchestrated team or the current agent alone.
+description: Plan-and-delegate orchestration for full-stack web apps. The orchestrator (Claude Opus 5.5 or GPT 6.1 Sol) only plans, briefs, triages and verifies; a configurable developer model (default via OpenCode) writes all code; the other vendor's model (GPT 6.1 Sol under Claude, Opus 5.5 under Codex) reviews read-only. Enforces React/Vite (or Next) + Express + PostgreSQL + Zustand/TanStack Query + Clean Architecture + MFA (email OTP and TOTP) + Tailwind + Motion, with AES-256-GCM field encryption and IDOR protection by default. Use when the user invokes fullstack-orchestrator, or asks to build, add a feature to, or fix a web app (React/Vite/Next, Express, Postgres or similar). Unless invoked by name, it first asks the user whether to use the orchestrated team or the current agent alone.
 ---
 
 # Fullstack Orchestrator
@@ -17,7 +17,7 @@ Skip it and go straight to §1 only if one of these is true:
 Otherwise the skill was triggered automatically. **Before any planning or edits, ask one question.** Use the host's question tool if it has one (e.g. AskUserQuestion); otherwise ask in chat and wait for the answer:
 
 > This looks like full-stack work. How do you want to run it?
-> 1. **Fullstack orchestrator**: I plan, DeepSeek writes the code, <reviewer> reviews it read-only. Best for features and new apps; slower per change.
+> 1. **Fullstack orchestrator**: I plan, the developer model writes the code, <reviewer> reviews it read-only. Best for features and new apps; slower per change.
 > 2. **Just me**: I do the work directly in this session. Best for small fixes and quick changes (roughly under 50 changed lines).
 
 Put the option that fits the request first and mark it "(Recommended)": "Just me" for a small fix or tweak, the orchestrator for a feature, a new resource or a new app.
@@ -39,8 +39,8 @@ Run `scripts/detect-host.sh`. You also know which agent you are. If detection fa
 
 | You are | Orchestrator (plan and delegate only) | Full-stack developer | Reviewer / bug hunter (read-only) |
 |---|---|---|---|
-| **Claude Code** (`--host claude`) | Claude Opus 5.5, effort medium | DeepSeek v4.1 Flash, variant max, via OpenCode | GPT 6.1 Sol, effort medium, via `codex exec -s read-only` |
-| **Codex** (`--host codex`) | GPT 6.1 Sol, effort medium | DeepSeek v4.1 Flash, variant max, via OpenCode | Claude Opus 5.5, effort medium, via `claude -p` with edit tools denied |
+| **Claude Code** (`--host claude`) | Claude Opus 5.5, effort medium | `ORCH_DEV_RUNNER` / `ORCH_DEV_MODEL` (default OpenCode), thinking high, max for `risk: high` | GPT 6.1 Sol, effort medium, via `codex exec -s read-only` (default) |
+| **Codex** (`--host codex`) | GPT 6.1 Sol, effort medium | same developer | Claude Opus 5.5, effort medium, via `claude -p` with edit tools denied (default) |
 
 **Other tools (Cursor, Qoder, …):** `detect-host.sh` can't identify them, so choose `--host` by the model *you* are running as. The reviewer is always the other vendor:
 - A Claude model → `--host claude` (GPT reviews).
@@ -49,7 +49,7 @@ Run `scripts/detect-host.sh`. You also know which agent you are. If detection fa
 
 The scripts are plain shell, so they run in any agent that has a terminal. If that agent's sandbox blocks network access, the user must allow the delegate scripts to run outside it.
 
-Model ids: `fullstack-orchestrator models` shows and changes them (saved per user; defaults in `config/models.env`). Do not hardcode them here.
+Every role has a provider, a model and a thinking level, and the user can change each: `fullstack-orchestrator models` shows them, `models set dev` / `models set review` pick provider (opencode, claude or codex), model and thinking level (saved per user; defaults in `config/models.env`). The reviewer's provider is `auto` (the other vendor of the host) unless the user forces one. Do not hardcode ids here; read them from `models`.
 
 If your own session is not running the orchestrator model and effort above, tell the user once and suggest a relaunch, then continue if they say so:
 - `claude --model claude-opus-5-5 --effort medium`
@@ -62,7 +62,7 @@ If your own session is not running the orchestrator model and effort above, tell
 - **Write only inside `<repo>/.orchestrator/`**: the plan and task or fix briefs. Never create or edit source, tests, configs, migrations, package files or docs in the repo, not even a one-line fix or a typo. Every change goes through `scripts/delegate-dev.sh`. The one exception is `scripts/task-worktree.sh land`, which applies an approved task's diff from its worktree verbatim.
 - Allowed: reading and searching files, read-only git, running tests, typecheck, lint and build to verify, starting the app to look at it, `scripts/check.sh`, and `scripts/task-worktree.sh`.
 - Do not run `scripts/scaffold-resource.sh` yourself; it writes source. Tell the developer to run it in the brief.
-- Do not hand code-writing to your own subagents. The developer is DeepSeek.
+- Do not hand code-writing to your own subagents. The developer is the configured developer model.
 - Do not commit or push unless the user asks.
 - The reviewer never edits. If `delegate-review.sh` exits 3 (the reviewer modified files), stop, show the user the listed paths, and ask how to proceed. Do not revert anything yourself.
 - Ask the user before `git init` when the target is not a git repository (the scripts require git).
@@ -78,17 +78,17 @@ Read `references/workflow.md` before the first task. It holds the plan, brief an
 5. **Triage.** You judge each finding. Valid BLOCKER and MAJOR findings go into `.orchestrator/tasks/Txx-fixN.md`. Reject invalid ones with a one-line reason in `plan.md`, and list them under "Do not change" in the fix brief. Then:
    - `scripts/delegate-dev.sh --task Txx --brief .orchestrator/tasks/Txx-fixN.md` (same developer session).
    - Review again.
-   - After `ORCH_MAX_FIX_ROUNDS` (default **2**) fix rounds that still end in CHANGES_REQUIRED, stop and escalate to the user. Low-risk tasks get one fix round.
-6. **Verify.** Run the test, typecheck and lint commands yourself (or `scripts/check.sh --task Txx`), check each acceptance criterion, and update `plan.md`.
+   - After `ORCH_MAX_FIX_ROUNDS` (default **1**) fix round that still ends in CHANGES_REQUIRED, stop and escalate to the user. If the review approves with only MINOR findings, do not start a fix round: list them under "Deferred" in `plan.md` and move on.
+6. **Verify.** Read the `CHECKS: PASS` line instead of re-running the tests: `check.sh` already ran them on this exact tree and reuses a passing result while the tree is unchanged (`check.sh --task Txx --force` re-runs them). Run the full test command yourself only once, in the main tree, after `land`. Check each acceptance criterion and update `plan.md`.
 7. **Report.** Tell the user what shipped, the review verdicts, rejected or deferred findings, required env vars or migrations, and residual risks.
 
 **Risk tiers** (the `risk` column in `plan.md`):
 - `high`: touches auth, MFA, sessions, crypto, user-owned data access, migrations, or anything security-relevant. Full checklist at the normal reviewer effort.
-- `low`: UI, components, styling, client state, or server code that touches no user-owned data or auth. Short checklist (correctness, architecture, frontend, tests) at low effort.
+- `low`: UI, components, styling, client state, or server code that touches no user-owned data or auth. Short checklist (correctness, architecture, frontend, tests) at low effort. Under `ORCH_SKIP_REVIEW_LINES` (default 100) changed lines it gets no model review, only the checks.
 - `none`: copy, docs, config with no runtime effect. Automated checks only; no model review.
 When in doubt, choose the higher tier.
 
-**Parallel tasks.** Tasks whose `depends` are done and that touch different files can run at the same time, each in its own worktree: `scripts/task-worktree.sh create --task Txx` before the task's first `delegate-dev.sh`. The dev, check and review scripts then use the worktree automatically. Background each `delegate-dev.sh`, and review one task while the next is developed. When a task is approved, `scripts/task-worktree.sh land --task Txx`, then `remove`. Without worktrees, run one task at a time per repository. Details and caveats (test databases, conflicts): `references/workflow.md` §8.
+**Parallel tasks (the default).** Tasks whose `depends` are done and that touch different files can run at the same time, each in its own worktree: `scripts/task-worktree.sh create --task Txx` before the task's first `delegate-dev.sh`. The dev, check and review scripts then use the worktree automatically. Background each `delegate-dev.sh`, and review one task while the next is developed. When a task is approved, `scripts/task-worktree.sh land --task Txx`, then `remove`. Plan for it: when two tasks are independent, put both in worktrees, and pipeline the work so that task N is under review while task N+1 is being developed. Only fall back to one task at a time per repository when tasks overlap in files or share a test database. Details and caveats (test databases, conflicts): `references/workflow.md` §8.
 
 ## 4. Standards every brief must carry
 
@@ -120,7 +120,7 @@ Defaults to state in every brief that touches them:
 
 | Path | Purpose |
 |---|---|
-| `scripts/delegate-dev.sh` | Brief → DeepSeek in a per-task OpenCode session; records the task baseline; runs `check.sh` and loops failures back to DeepSeek; prints the DEV REPORT; `--watch` opens a live OpenCode TUI |
+| `scripts/delegate-dev.sh` | Brief → developer (opencode, claude or codex) in a per-task session, short prompt on fix rounds; records the task baseline; runs `check.sh` and loops failures back to the developer; prints the DEV REPORT; `--watch` opens a live OpenCode TUI |
 | `scripts/delegate-review.sh` | Task diff → cross-vendor reviewer, read-only, with a before/after working-tree guard; check gate, risk tiers, delta re-reviews |
 | `scripts/check.sh` | Static security/quality rules on the task's added lines + the plan's test command |
 | `scripts/task-worktree.sh` | Per-task git worktrees for parallel tasks: create, land, remove, list |

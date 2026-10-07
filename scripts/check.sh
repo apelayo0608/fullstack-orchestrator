@@ -2,15 +2,18 @@
 # Automated gate that runs before any model review: static rules on the task diff,
 # then the project's test/typecheck/lint command.
 #
-# Usage: check.sh --task T01 [--repo DIR] [--cmd "npm test"] [--static-only] [--quiet]
+# Usage: check.sh --task T01 [--repo DIR] [--cmd "npm test"] [--static-only] [--force] [--quiet]
 #
 #   --task         Task id already delegated with delegate-dev.sh (its baseline must exist).
 #   --repo         Any path inside the target git repo (default: current directory).
 #   --cmd          Test command. Default: ORCH_CHECK_CMD, else the "Test commands:" line
 #                  of .orchestrator/plan.md. Without one, only the static rules run.
 #   --static-only  Skip the test command.
+#   --force        Re-run even when the tree is unchanged since the last passing check.
 #   --quiet        Print only the result line and the report path.
 #
+# Static findings are reported without running the test command: fix them first, then the
+# tests run once. A tree unchanged since the last PASS reuses that result.
 # Static rules look only at lines the task added. Silence a deliberate exception by
 # putting "orch-allow" in a comment on that line.
 # Writes .orchestrator/checks/<task>-c<N>.md and records the result in <task>.last.
@@ -18,13 +21,14 @@
 set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/lib.sh"
 
-task="" repo="." test_cmd="" cmd_set=0 static_only=0 quiet=0
+task="" repo="." test_cmd="" cmd_set=0 static_only=0 force=0 quiet=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --task) task=${2:?}; shift 2 ;;
     --repo) repo=${2:?}; shift 2 ;;
     --cmd) test_cmd=${2?}; cmd_set=1; shift 2 ;;
     --static-only) static_only=1; shift ;;
+    --force) force=1; shift ;;
     --quiet) quiet=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) die "unknown argument: $1 (see --help)" ;;
@@ -46,6 +50,17 @@ report="$orch/checks/$task-c$n.md"
 test_log="$orch/logs/$task-check-c$n.log"
 
 base="$(<"$orch/baselines/$task.tree")"
+
+if (( !force && !static_only )) && [[ "$(cat "$orch/checks/$task.last" 2>/dev/null || true)" == "PASS $(worktree_tree "$work")" ]]; then
+  {
+    echo "## CHECK RESULT: PASS"
+    echo
+    echo "- Task: $task (check $n)"
+    echo "- Tree unchanged since the last passing check; nothing re-run."
+  } > "$report"
+  if (( quiet )); then echo "CHECK RESULT: PASS ($report, cached)"; else cat "$report"; fi
+  exit 0
+fi
 
 # --- Static rules ----------------------------------------------------------
 findings="$(git -C "$main" diff -U0 --no-color --no-ext-diff "$base" "$(worktree_tree "$work")" | perl -ne '
@@ -102,7 +117,9 @@ static_count=0
 
 # --- Test command ----------------------------------------------------------
 test_status=skipped
-if (( !static_only )) && [[ -n $test_cmd ]]; then
+if (( static_count > 0 && !static_only )) && [[ -n $test_cmd ]]; then
+  test_status="not run (fix the static findings first)"
+elif (( !static_only )) && [[ -n $test_cmd ]]; then
   (( quiet )) || echo "Running checks for $task: $test_cmd" >&2
   set +e
   (cd "$work" && CI=1 bash -c "$test_cmd") > "$test_log" 2>&1
@@ -138,7 +155,7 @@ result=PASS
   fi
 } > "$report"
 
-echo "$result $(worktree_tree "$work")" > "$orch/checks/$task.last"
+(( static_only )) || echo "$result $(worktree_tree "$work")" > "$orch/checks/$task.last"
 
 if (( quiet )); then
   echo "CHECK RESULT: $result ($report)"

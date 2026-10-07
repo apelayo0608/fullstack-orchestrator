@@ -112,3 +112,42 @@ last_section() {
     tail -n 60 "$file"
   fi
 }
+
+# --- Roles: provider (runner), model and thinking level ----------------------
+
+check_runner() {
+  [[ $1 == opencode || $1 == claude || $1 == codex ]] || die "runner must be opencode, claude or codex (got '$1')"
+}
+
+# dev_effort <risk>: the developer's thinking level. A #variant in ORCH_DEV_MODEL wins.
+dev_effort() {
+  local risk=${1:-high}
+  if [[ $ORCH_DEV_MODEL == *'#'* ]]; then echo "${ORCH_DEV_MODEL#*#}"
+  elif [[ $risk == high ]]; then echo "$ORCH_DEV_EFFORT_HIGH_RISK"
+  else echo "$ORCH_DEV_EFFORT"; fi
+}
+
+# resolve_review <host|""> <risk> <mode>: sets REV_RUNNER, REV_MODEL, REV_EFFORT, REV_LABEL.
+# host is only needed while ORCH_REVIEW_RUNNER=auto.
+resolve_review() {
+  local host=$1 risk=$2 mode=$3 d_model d_eff d_low
+  REV_RUNNER=$ORCH_REVIEW_RUNNER
+  if [[ $REV_RUNNER == auto ]]; then
+    case "$host" in
+      claude) REV_RUNNER=codex ;;
+      codex) REV_RUNNER=claude ;;
+      *) die "cannot pick the reviewer without a host (claude or codex)" ;;
+    esac
+    if [[ $host == claude ]]; then d_model=$ORCH_REVIEW_MODEL_ON_CLAUDE; d_eff=$ORCH_REVIEW_EFFORT_ON_CLAUDE; d_low=$ORCH_REVIEW_EFFORT_LOW_ON_CLAUDE
+    else d_model=$ORCH_REVIEW_MODEL_ON_CODEX; d_eff=$ORCH_REVIEW_EFFORT_ON_CODEX; d_low=$ORCH_REVIEW_EFFORT_LOW_ON_CODEX; fi
+  else
+    check_runner "$REV_RUNNER"
+    d_model="" d_eff="" d_low=""
+  fi
+  REV_MODEL=${ORCH_REVIEW_MODEL:-$d_model}
+  [[ -n $REV_MODEL ]] || die "ORCH_REVIEW_MODEL is required when ORCH_REVIEW_RUNNER=$REV_RUNNER (fullstack-orchestrator models set review <model>)"
+  REV_EFFORT=${ORCH_REVIEW_EFFORT:-$d_eff}
+  if [[ $risk == low ]]; then REV_EFFORT=${ORCH_REVIEW_EFFORT_LOW:-${d_low:-$REV_EFFORT}}
+  elif [[ $mode == delta && -n $ORCH_REVIEW_EFFORT_DELTA ]]; then REV_EFFORT=$ORCH_REVIEW_EFFORT_DELTA; fi
+  REV_LABEL="$REV_MODEL${REV_EFFORT:+ ($REV_EFFORT)} via $REV_RUNNER"
+}

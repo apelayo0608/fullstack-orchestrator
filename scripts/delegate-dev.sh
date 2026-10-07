@@ -12,6 +12,10 @@
 #                  session, so you can watch the developer live. Typing there steers it.
 #   --dry-run      Print the command and prompt location without running anything.
 #
+# Provider, model and thinking level come from ORCH_DEV_RUNNER (opencode | claude | codex),
+# ORCH_DEV_MODEL and ORCH_DEV_EFFORT / ORCH_DEV_EFFORT_HIGH_RISK; see `fullstack-orchestrator models`.
+# Fix rounds in the same session get a short prompt (the session already holds the contract).
+#
 # The first run of a task records a baseline snapshot of the working tree so
 # delegate-review.sh can diff the whole task. Full output: .orchestrator/logs/.
 # If the task has a worktree (task-worktree.sh create), the developer works there.
@@ -49,37 +53,85 @@ work="$(task_workdir "$repo" "$task")"
 brief="${brief:-$orch/tasks/$task.md}"
 [[ -f $brief ]] || die "brief not found: $brief"
 
+runner="$ORCH_DEV_RUNNER"; check_runner "$runner"
+risk="$(plan_risk "$orch" "$task")"; risk="${risk:-high}"
+effort="$(dev_effort "$risk")"
+model_id="${ORCH_DEV_MODEL%%#*}"
+
 session_file="$orch/sessions/$task.id"
+started_file="$orch/sessions/$task.started"
+if (( new_session )); then rm -f "$started_file"; fi
 if (( !new_session )) && [[ -f $session_file ]]; then
   session="$(<"$session_file")"
 else
-  session="$(session_id "$work" "$task")"
-  (( new_session )) && session="${session}_$(date +%s)"
+  hash="$(printf '%s' "$work$task" | shasum -a 256 | cut -c1-32)"
+  case "$runner" in
+    claude) # claude needs a UUID
+      session="${hash:0:8}-${hash:8:4}-4${hash:13:3}-a${hash:17:3}-${hash:20:12}" ;;
+    *) session="$(session_id "$work" "$task")" ;;
+  esac
+  (( new_session )) && [[ $runner == opencode ]] && session="${session}_$(date +%s)"
+  (( new_session )) && [[ $runner == claude ]] && session="$(uuidgen 2>/dev/null | tr 'A-Z' 'a-z' || echo "$session")"
 fi
+# Codex has no resumable session here, so it always needs the full contract.
+resumed=0
+[[ -f $started_file && $runner != codex ]] && (( !new_session )) && resumed=1
 
 ts="$(date +%Y%m%d-%H%M%S)"
 prompt_file="$orch/logs/$task-dev-$ts.prompt.md"
 log="$orch/logs/$task-dev-$ts.log"
-cmd=(opencode run -m "$ORCH_DEV_MODEL" --auto -s "$session" --title "orch $task")
-# The TUI attaches to the same background service as `opencode run`, so it shows the run live.
-watch_cmd="cd $(printf %q "$work") && opencode -s $(printf %q "$session")"
+# dev_cmd [first]: the developer command (the prompt arrives on stdin, except for opencode).
+dev_cmd() {
+  case "$runner" in
+    opencode)
+      cmd=(opencode run -m "$model_id" ${effort:+--variant "$effort"} --auto -s "$session" --title "orch $task") ;;
+    claude)
+      cmd=(claude -p --model "$model_id" ${effort:+--effort "$effort"} --permission-mode bypassPermissions)
+      if [[ -f $started_file ]]; then cmd+=(--resume "$session"); else cmd+=(--session-id "$session"); fi ;;
+    codex)
+      cmd=(codex exec -m "$model_id" ${effort:+-c "model_reasoning_effort=\"$effort\""}
+           -c 'approval_policy="never"' -s workspace-write --skip-git-repo-check -C "$work" -) ;;
+  esac
+}
+dev_cmd
+# The OpenCode TUI attaches to the same background service as `opencode run`, so it shows the run live.
+watch_cmd=""
+[[ $runner == opencode ]] && watch_cmd="cd $(printf %q "$work") && opencode -s $(printf %q "$session")"
 
 if (( dry_run )); then
   echo "repo:    $repo"
   [[ $work != "$repo" ]] && echo "workdir: $work (task worktree)"
   echo "brief:   $brief"
   echo "session: $session"
+  echo "runner:  $runner  model: $model_id  thinking: ${effort:-default}  (risk $risk)"
+  echo "prompt:   $( ((resumed)) && echo 'short (resumed session)' || echo 'full contract')"
   echo "command: (cd $work && ${cmd[*]} \"<contract + brief>\")"
   echo "log:     $log"
-  echo "watch:   $watch_cmd"
+  echo "watch:   ${watch_cmd:-n/a ($runner has no live view)}"
   exit 0
 fi
 
-require_cmd opencode
+require_cmd "$runner"
 ensure_workspace "$repo"
 [[ -f "$orch/baselines/$task.tree" ]] || worktree_tree "$work" > "$orch/baselines/$task.tree"
 echo "$session" > "$session_file"
 
+if (( resumed )); then
+cat > "$prompt_file" <<EOF
+Continue as the FULL-STACK DEVELOPER in this same session, on the brief below. The same
+rules apply (scope, security requirements, architecture, no commits, orch-allow); you have
+already read the references, so reopen them only if you need to. Run only the tests for the
+files you touched, plus typecheck and lint; the full suite runs in the automated checks.
+Finish with the same "## DEV REPORT" section as before (Status, Files changed, Tests,
+Security notes, Open questions).
+
+---
+
+# BRIEF ($task)
+
+$(cat "$brief")
+EOF
+else
 cat > "$prompt_file" <<EOF
 You are the FULL-STACK DEVELOPER on an orchestrated team. An orchestrator plans
 and assigns work; you implement it; an independent reviewer audits your diff read-only.
@@ -106,7 +158,9 @@ RULES
     * Inputs are validated with zod z.strictObject; SQL is parameterized.
     * Clean Architecture dependency rule: domain <- application <- infrastructure/interface.
 - Write or update tests. Every new or changed resource endpoint needs a cross-user
-  (IDOR) test. Run the tests, typecheck and lint, and fix failures before reporting.
+  (IDOR) test. Run the tests for the files you touched, plus typecheck and lint, and fix
+  failures before reporting. Do not run the whole suite repeatedly: the automated checks
+  run the full test command once when you finish.
 - Automated checks run on your diff when you finish and send failures back to you.
   They flag z.object in server code, actor ids read from req.body/query/params,
   interpolated SQL, "WHERE id = \$n" without owner_id in repositories, /api routers
@@ -131,10 +185,13 @@ Finish your final message with this section, exactly:
 
 $(cat "$brief")
 EOF
+fi
 
-echo "Delegating $task to $ORCH_DEV_MODEL (session $session)..." >&2
-echo "Watch live: $watch_cmd" >&2
-if (( watch )); then
+echo "Delegating $task to $model_id${effort:+ ($effort)} via $runner (session $session, $( ((resumed)) && echo 'short prompt' || echo 'full contract'))..." >&2
+[[ -n $watch_cmd ]] && echo "Watch live: $watch_cmd" >&2
+if (( watch )) && [[ -z $watch_cmd ]]; then
+  echo "warning: --watch only works with the opencode runner" >&2
+elif (( watch )); then
   if [[ $(uname) == Darwin ]] && command -v osascript >/dev/null 2>&1; then
     # Open after the run has started so it creates the session with its title.
     ( sleep 3
@@ -147,17 +204,23 @@ if (( watch )); then
   fi
 fi
 
-# run_dev <prompt file> <log>: one OpenCode turn in this task's session.
+# run_dev <prompt file> <log>: one developer turn in this task's session.
 run_dev() {
   local rc
+  dev_cmd
   set +e
-  (cd "$work" && "${cmd[@]}" "$(cat "$1")") 2>&1 | strip_ansi > "$2"
+  if [[ $runner == opencode ]]; then
+    (cd "$work" && "${cmd[@]}" "$(cat "$1")") 2>&1 | strip_ansi > "$2"
+  else
+    (cd "$work" && env -u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT "${cmd[@]}" < "$1") 2>&1 | strip_ansi > "$2"
+  fi
   rc=${PIPESTATUS[0]}
   set -e
   if (( rc != 0 )); then
-    echo "error: opencode exited with status $rc; see $2" >&2
+    echo "error: $runner exited with status $rc; see $2" >&2
     exit "$rc"
   fi
+  touch "$started_file"
 }
 
 run_dev "$prompt_file" "$log"

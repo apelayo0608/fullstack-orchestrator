@@ -6,8 +6,8 @@
 #
 #   --task         Task id already delegated with delegate-dev.sh (its baseline must exist).
 #   --brief        Brief the work is judged against (default: .orchestrator/tasks/<task>.md).
-#   --host         Who is orchestrating. Claude -> GPT reviewer via codex exec;
-#                  Codex -> Opus reviewer via claude -p. Default: detect-host.sh.
+#   --host         Who is orchestrating; only used while ORCH_REVIEW_RUNNER=auto
+#                  (Claude -> codex reviewer, Codex -> claude reviewer). Default: detect-host.sh.
 #   --risk         high: full security checklist at the normal effort (default).
 #                  low:  correctness/architecture/frontend/tests checklist at low effort.
 #                  none: no model review; records an APPROVE once the checks pass.
@@ -16,6 +16,12 @@
 #   --skip-checks  Do not require a passing check.sh run first.
 #   --repo         Any path inside the target git repo (default: current directory).
 #   --dry-run      Print the reviewer command without running it.
+#
+# Reviewer provider, model and thinking level come from ORCH_REVIEW_RUNNER (auto | opencode |
+# claude | codex), ORCH_REVIEW_MODEL and the ORCH_REVIEW_EFFORT* settings; see
+# `fullstack-orchestrator models`. auto = the other vendor of --host. Later rounds use
+# ORCH_REVIEW_EFFORT_DELTA (default low). A risk: low task with fewer than
+# ORCH_SKIP_REVIEW_LINES changed lines gets no model review, like risk: none.
 #
 # Round 1 reviews the whole task diff (baseline -> now). Later rounds review only
 # what changed since the previous round, plus whether the previous findings are fixed.
@@ -52,7 +58,7 @@ brief="${brief:-$orch/tasks/$task.md}"
 risk="${risk:-$(plan_risk "$orch" "$task")}"
 risk="${risk:-high}"
 [[ $risk == high || $risk == low || $risk == none ]] || die "--risk must be high, low or none (got '$risk')"
-if [[ $risk != none ]]; then
+if [[ $risk != none && $ORCH_REVIEW_RUNNER == auto ]]; then
   host="${host:-$("$SCRIPT_DIR/detect-host.sh")}" || exit 1
   [[ $host == claude || $host == codex ]] || die "--host must be claude or codex"
 fi
@@ -70,25 +76,29 @@ log="$orch/logs/$task-review-r$round.log"
 mode=full
 (( round > 1 && !full )) && [[ -f "$orch/reviews/$task-r$prev.tree" && -f "$orch/reviews/$task-r$prev.md" ]] && mode=delta
 
-if [[ $host == claude ]]; then
-  effort="$ORCH_REVIEW_EFFORT_ON_CLAUDE"; [[ $risk == low ]] && effort="$ORCH_REVIEW_EFFORT_LOW_ON_CLAUDE"
-  reviewer="$ORCH_REVIEW_MODEL_ON_CLAUDE ($effort) via codex"
-  cmd=(codex exec -m "$ORCH_REVIEW_MODEL_ON_CLAUDE"
-       -c "model_reasoning_effort=\"$effort\""
-       -c 'approval_policy="never"'
-       -s read-only --ephemeral --skip-git-repo-check
-       -C "$work" -o "$out" -)
-elif [[ $host == codex ]]; then
-  effort="$ORCH_REVIEW_EFFORT_ON_CODEX"; [[ $risk == low ]] && effort="$ORCH_REVIEW_EFFORT_LOW_ON_CODEX"
-  reviewer="$ORCH_REVIEW_MODEL_ON_CODEX ($effort) via claude"
-  allowed='Read,Grep,Glob,Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git status:*),Bash(git ls-files:*),Bash(git blame:*)'
-  cmd=(claude -p --model "$ORCH_REVIEW_MODEL_ON_CODEX" --effort "$effort"
-       --permission-mode dontAsk --allowedTools "$allowed"
-       --disallowedTools 'Edit,Write,NotebookEdit'
-       --no-session-persistence --output-format text)
-  # The diffs live in the main tree's .orchestrator/, outside a task worktree.
-  [[ $work != "$repo" ]] && cmd+=(--add-dir "$orch")
-fi
+build_cmd() {
+  resolve_review "$host" "$risk" "$mode"
+  case "$REV_RUNNER" in
+    codex)
+      cmd=(codex exec -m "$REV_MODEL" ${REV_EFFORT:+-c "model_reasoning_effort=\"$REV_EFFORT\""}
+           -c 'approval_policy="never"'
+           -s read-only --ephemeral --skip-git-repo-check
+           -C "$work" -o "$out" -) ;;
+    claude)
+      allowed='Read,Grep,Glob,Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git status:*),Bash(git ls-files:*),Bash(git blame:*)'
+      cmd=(claude -p --model "$REV_MODEL" ${REV_EFFORT:+--effort "$REV_EFFORT"}
+           --permission-mode dontAsk --allowedTools "$allowed"
+           --disallowedTools 'Edit,Write,NotebookEdit'
+           --no-session-persistence --output-format text)
+      # The diffs live in the main tree's .orchestrator/, outside a task worktree.
+      [[ $work != "$repo" ]] && cmd+=(--add-dir "$orch") ;;
+    opencode)
+      # The plan agent cannot edit; the working-tree guard below is the backstop.
+      cmd=(opencode run -m "${REV_MODEL%%#*}" ${REV_EFFORT:+--variant "$REV_EFFORT"} --agent plan --title "orch review $task") ;;
+  esac
+  reviewer="$REV_LABEL"
+}
+[[ $risk == none ]] || build_cmd
 
 if (( dry_run )); then
   echo "repo:     $repo"
@@ -135,13 +145,20 @@ git -C "$repo" diff "$base" "$before" > "$diff_file"
 [[ -s $diff_file ]] || die "no changes since the $task baseline; nothing to review"
 echo "$before" > "$tree_file"
 
+skip_reason="Risk none"
+if [[ $risk == low ]] && (( ORCH_SKIP_REVIEW_LINES > 0 )); then
+  changed="$(git -C "$repo" diff --numstat "$base" "$before" | awk '$1 != "-" {n += $1 + $2} END {print n + 0}')"
+  if (( changed < ORCH_SKIP_REVIEW_LINES )); then
+    risk=none; skip_reason="Risk low and only $changed changed lines (< ORCH_SKIP_REVIEW_LINES=$ORCH_SKIP_REVIEW_LINES)"
+  fi
+fi
 if [[ $risk == none ]]; then
   {
     echo "## REVIEW VERDICT: APPROVE"
     echo
-    echo "Risk none: no model review. Automated checks passed on tree $before."
+    echo "$skip_reason: no model review. Automated checks passed on tree $before."
   } > "$out"
-  echo "review: $out (risk none, checks only)"
+  echo "review: $out ($skip_reason, checks only)"
   exit 0
 fi
 require_cmd "${cmd[0]}"
@@ -235,13 +252,17 @@ EOF
 
 echo "Review round $round ($mode, risk $risk) of $task by $reviewer..." >&2
 set +e
-if [[ $host == claude ]]; then
-  env -u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT "${cmd[@]}" < "$prompt_file" 2>&1 | strip_ansi > "$log"
-  status=${PIPESTATUS[0]}
-else
-  (cd "$work" && env -u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT "${cmd[@]}" < "$prompt_file" > "$out" 2> "$log")
-  status=$?
-fi
+case "$REV_RUNNER" in
+  codex)
+    env -u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT "${cmd[@]}" < "$prompt_file" 2>&1 | strip_ansi > "$log"
+    status=${PIPESTATUS[0]} ;;
+  claude)
+    (cd "$work" && env -u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT "${cmd[@]}" < "$prompt_file" > "$out" 2> "$log")
+    status=$? ;;
+  opencode)
+    (cd "$work" && "${cmd[@]}" "$(cat "$prompt_file")" 2> "$log" | strip_ansi > "$out")
+    status=${PIPESTATUS[0]} ;;
+esac
 set -e
 
 after="$(worktree_tree "$work")"

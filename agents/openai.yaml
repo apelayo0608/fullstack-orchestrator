@@ -1,6 +1,6 @@
 interface:
   display_name: "Fullstack Orchestrator"
-  short_description: "Plan and delegate: DeepSeek codes, Opus reviews read-only"
-  default_prompt: "Use $fullstack-orchestrator to plan this work, delegate the coding to DeepSeek, and get it reviewed by Opus."
+  short_description: "Plan and delegate: a configurable developer codes, a cross-vendor model reviews read-only"
+  default_prompt: "Use $fullstack-orchestrator to plan this work, delegate the coding to the developer model, and get it reviewed read-only."
 policy:
   allow_implicit_invocation: true

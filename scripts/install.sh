@@ -3,7 +3,7 @@
 # Cursor and Qoder.
 #
 # Usage: fullstack-orchestrator <install|uninstall|doctor> [--copy] [--only=claude,codex,cursor,qoder]
-#        fullstack-orchestrator models [show|setup|set <role> <model>|reset]   (change models)
+#        fullstack-orchestrator models [show|setup|set <role> [<value>]|reset]   (provider, model, thinking per role)
 #
 #   install     Link this folder into each tool's user skills folder (default command):
 #                 ~/.claude/skills  ~/.codex/skills  ~/.cursor/skills  ~/.qoder/skills
@@ -117,9 +117,13 @@ case "$cmd" in
       dest="$(skills_dir "$h")/$NAME"
       if is_ours "$dest" 2>/dev/null; then echo "  ✓ $h: $dest"; else echo "  ✗ $h: not installed (run install)"; fail=1; fi
     done
-    if command -v opencode >/dev/null 2>&1; then
-      # shellcheck source=lib.sh
-      source "$SKILL_DIR/scripts/lib.sh"
+    # shellcheck source=lib.sh
+    source "$SKILL_DIR/scripts/lib.sh"
+    echo "Roles: developer $ORCH_DEV_RUNNER, reviewer $ORCH_REVIEW_RUNNER (fullstack-orchestrator models)"
+    for r in "$ORCH_DEV_RUNNER" "$ORCH_REVIEW_RUNNER"; do
+      [[ $r == auto || $r == opencode ]] || command -v "$r" >/dev/null 2>&1 || { echo "  ✗ runner '$r' is not on PATH"; fail=1; }
+    done
+    if [[ $ORCH_DEV_RUNNER == opencode ]] && command -v opencode >/dev/null 2>&1; then
       echo "Developer model:"
       # The OpenCode background service can answer empty while it starts; retry once.
       models="$(opencode models 2>/dev/null || true)"

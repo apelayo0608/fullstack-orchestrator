@@ -47,13 +47,13 @@ Parallel: <e.g. T03 and T04 in worktrees after T02, or "none">
 
 Risk (`high` | `low` | `none`) decides how much review a task gets; see SKILL.md §3. Keep `high` for anything near auth, MFA, crypto, sessions, migrations or user-owned data.
 
-Task sizing: one vertical slice per task (migration → repository → use case → route → hook → UI → tests) that a reviewer can judge from one diff, typically under ~800 changed lines. Put scaffolding, auth/MFA and crypto infrastructure in early tasks, because later tasks depend on them.
+Task sizing: one vertical slice per task (migration → repository → use case → route → hook → UI → tests) that a reviewer can judge from one diff, typically under ~400 changed lines (review time grows faster than diff size; split anything bigger). Put scaffolding, auth/MFA and crypto infrastructure in early tasks, because later tasks depend on them.
 
 Show the plan to the user before the first delegation when the scope is new or large.
 
 ## 2. Task brief (`.orchestrator/tasks/T01.md`)
 
-DeepSeek sees only the brief plus the standing contract that `delegate-dev.sh` prepends. Make the brief self-contained.
+The developer sees only the brief plus the standing contract that `delegate-dev.sh` prepends (in full on the first run, a short reminder on fix rounds of the same session). Make the brief self-contained.
 
 ```markdown
 # T02: Users, sessions, login + email OTP
@@ -92,9 +92,9 @@ DeepSeek sees only the brief plus the standing contract that `delegate-dev.sh` p
 ```
 Runs can take many minutes. In Claude Code, run it with `run_in_background` and wait for the completion notice. In Codex, request escalated permissions and use a long timeout. When it finishes, read the printed `DEV REPORT`, `git status` and the `CHECKS:` line.
 
-**Automated checks.** After the developer finishes, the script runs `check.sh`: static rules on the lines the task added (`z.object` in server code, actor ids from `req.body/query/params`, interpolated SQL, `WHERE id = $n` without `owner_id` in repositories, `/api` routers without `requireMfa`, `.only`/`.skip`, `@ts-ignore`/`any`, `dangerouslySetInnerHTML`, secret-looking `VITE_*` vars, new routes without an IDOR test), then the `Test commands:` line. Failures go straight back to the developer in the same session, up to `ORCH_MAX_CHECK_FIXES` (default 2) times. Exit 4 / `CHECKS: FAIL` means they still fail: write a fix brief from the check report. A line the developer marks `orch-allow: <reason>` is skipped by the rules; the reviewer is told to judge those exemptions.
+**Automated checks.** After the developer finishes, the script runs `check.sh`: static rules on the lines the task added (`z.object` in server code, actor ids from `req.body/query/params`, interpolated SQL, `WHERE id = $n` without `owner_id` in repositories, `/api` routers without `requireMfa`, `.only`/`.skip`, `@ts-ignore`/`any`, `dangerouslySetInnerHTML`, secret-looking `VITE_*` vars, new routes without an IDOR test), then the `Test commands:` line. Static findings are reported before the test command runs, so they go back to the developer without waiting for the suite; the tests run once the static rules are clean, and a tree unchanged since the last PASS reuses it. Failures go straight back to the developer in the same session, up to `ORCH_MAX_CHECK_FIXES` (default 2) times. Exit 4 / `CHECKS: FAIL` means they still fail: write a fix brief from the check report. A line the developer marks `orch-allow: <reason>` is skipped by the rules; the reviewer is told to judge those exemptions.
 
-**Live view.** Let the user watch DeepSeek work. The OpenCode TUI attaches to the same background service as the run:
+**Live view.** Let the user watch the developer work (OpenCode runner only; claude and codex runners have no live view). The OpenCode TUI attaches to the same background service as the run:
 - Claude desktop app (terminal-panel tools available): right after starting the background run, open a terminal tab in the panel and run the `watch` command that `delegate-dev.sh --task T02 --dry-run` prints (`cd <repo> && opencode -s <session>`). Reuse that tab for fix rounds of the same task.
 - Anywhere else on macOS: add `--watch`; the script opens a Terminal.app window with the TUI.
 - Otherwise: tell the user the `Watch live:` command the script prints on stderr.
@@ -111,7 +111,7 @@ Tell the user that typing in the live view sends messages into the developer's s
 ```
 The script first makes sure `check.sh` passes on the current tree (exit 4 otherwise; `--skip-checks` only when the user asks). The risk comes from `plan.md` (override with `--risk`):
 - `high`: full security checklist, normal effort.
-- `low`: correctness, architecture, frontend and tests items only, at low effort.
+- `low`: correctness, architecture, frontend and tests items only, at low effort. Fewer than `ORCH_SKIP_REVIEW_LINES` (default 100) changed lines: no model review, like `none`.
 - `none`: no model review; an APPROVE is recorded once the checks pass.
 
 Round 1 gets the full task diff (baseline → now), the brief and the checklist. It returns `## REVIEW VERDICT: APPROVE | CHANGES_REQUIRED` with numbered findings.
@@ -143,13 +143,15 @@ Then:
 <skill>/scripts/delegate-dev.sh --task T02 --brief .orchestrator/tasks/T02-fix1.md
 <skill>/scripts/delegate-review.sh --task T02 --host <host>
 ```
-The developer continues in the same OpenCode session, so it remembers the task. Round 2 and later review only the changes since the previous round (`T02-r2.delta.diff`): the reviewer marks each earlier BLOCKER/MAJOR finding FIXED, NOT_FIXED or REJECTED and looks for regressions in the new changes. Pass `--full` to re-review the whole task diff when the fixes were large or restructured the code.
+The developer continues in the same OpenCode session, so it remembers the task. Round 2 and later review only the changes since the previous round (`T02-r2.delta.diff`), at `ORCH_REVIEW_EFFORT_DELTA` (default low): the reviewer marks each earlier BLOCKER/MAJOR finding FIXED, NOT_FIXED or REJECTED and looks for regressions in the new changes. Pass `--full` to re-review the whole task diff when the fixes were large or restructured the code.
 
-**Limit:** after `ORCH_MAX_FIX_ROUNDS` (default 2; one for `low` risk) rounds that still end in CHANGES_REQUIRED, stop. Report the open findings and your assessment to the user and ask how to proceed.
+If the verdict is APPROVE with only MINOR findings, skip the fix round: record them under "Deferred".
+
+**Limit:** after `ORCH_MAX_FIX_ROUNDS` (default 1) fix round that still ends in CHANGES_REQUIRED, stop. Report the open findings and your assessment to the user and ask how to proceed.
 
 ## 6. Verify and close
 
-- Run the test, typecheck and lint commands yourself. Reading output and running tests is allowed; editing is not.
+- Do not re-run the tests the checks already ran: the `CHECKS: PASS` line covers this exact tree. Run the full test command once in the main tree after `land`. Reading output and running tests is allowed; editing is not.
 - Check each acceptance criterion against the code. Start the app if the task is UI-visible and the environment allows it.
 - Update `plan.md`: status `done`, rounds, final verdict.
 - Do not commit unless the user asked. If they want per-task commits, ask the developer to commit in the brief, or ask the user.
@@ -184,7 +186,7 @@ Independent tasks (their `depends` are done, they touch different files) can run
 - Verify in the worktree before landing (`check.sh --task Txx`), and run the full test command in the main tree after landing.
 
 ## Rules of thumb
-- Without worktrees, run tasks one at a time per repository. The developer and reviewer share the working tree.
+- Prefer worktrees for independent tasks and pipeline them: review task N while task N+1 is developed. Without worktrees, run tasks one at a time per repository, because the developer and reviewer share the working tree.
 - Keep briefs short and concrete. Long, vague briefs make the developer improvise.
 - Repeat the relevant security requirements in every brief that touches data. Do not assume the developer remembers them from earlier tasks.
 - If the user changes direction mid-task, write a new brief; use `--new-session` only when the earlier context would mislead the developer.
