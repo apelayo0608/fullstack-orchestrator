@@ -67,7 +67,16 @@ prefix_rule(pattern=["/Users/adrian/.codex/skills/fullstack-orchestrator/scripts
 
 ## Swap models
 
-Edit `config/models.env`, or export a variable for one session, e.g. `ORCH_DEV_MODEL='opencode-go/deepseek-v4-pro' …`. Check DeepSeek variants with `opencode run -m 'opencode-go/deepseek-v4.1-flash#<variant>' "hi"`; unknown variants are rejected.
+```bash
+fullstack-orchestrator models                 # show orchestrator, developer and reviewer models
+fullstack-orchestrator models setup           # interactive; Enter keeps a value
+fullstack-orchestrator models set dev        # pick provider, then model, then thinking level
+fullstack-orchestrator models set dev opencode-go/deepseek-v4-pro#max
+fullstack-orchestrator models set review-on-claude gpt-6.1-sol
+fullstack-orchestrator models set review-on-claude-effort high
+fullstack-orchestrator models reset [role]    # back to the defaults
+```
+Roles: `dev`, `orch-claude`, `orch-codex`, `review-on-claude`, `review-on-codex` (add `-effort` for effort, except `dev`, whose effort is the `#variant`). Choices are saved to `~/.config/fullstack-orchestrator/models.env`, so reinstalling does not lose them. `set dev` warns when OpenCode does not list the model. The orchestrator is your host session: launch it with the model `models` prints. To override once, export a variable, e.g. `ORCH_DEV_MODEL=... claude`. Defaults live in `config/models.env`; change them there only for the repo itself.
 
 ## What happens in a project
 

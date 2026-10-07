@@ -49,7 +49,7 @@ Run `scripts/detect-host.sh`. You also know which agent you are. If detection fa
 
 The scripts are plain shell, so they run in any agent that has a terminal. If that agent's sandbox blocks network access, the user must allow the delegate scripts to run outside it.
 
-Model ids live in `config/models.env`. Change them there, not here.
+Model ids: `fullstack-orchestrator models` shows and changes them (saved per user; defaults in `config/models.env`). Do not hardcode them here.
 
 If your own session is not running the orchestrator model and effort above, tell the user once and suggest a relaunch, then continue if they say so:
 - `claude --model claude-opus-5-5 --effort medium`

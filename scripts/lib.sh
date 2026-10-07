@@ -2,6 +2,11 @@
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 SKILL_DIR="$(dirname "$SCRIPT_DIR")"
+# Per-user model choices (scripts/models.sh) load first, so they beat the defaults
+# in config/models.env and survive a reinstall; exported variables beat both.
+ORCH_USER_CONFIG="${ORCH_CONFIG_FILE:-${XDG_CONFIG_HOME:-$HOME/.config}/fullstack-orchestrator/models.env}"
+# shellcheck disable=SC1090
+[[ -f $ORCH_USER_CONFIG ]] && source "$ORCH_USER_CONFIG"
 # shellcheck source=../config/models.env
 source "$SKILL_DIR/config/models.env"
 

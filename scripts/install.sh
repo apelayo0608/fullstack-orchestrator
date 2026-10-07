@@ -3,6 +3,7 @@
 # Cursor and Qoder.
 #
 # Usage: fullstack-orchestrator <install|uninstall|doctor> [--copy] [--only=claude,codex,cursor,qoder]
+#        fullstack-orchestrator models [show|setup|set <role> <model>|reset]   (change models)
 #
 #   install     Link this folder into each tool's user skills folder (default command):
 #                 ~/.claude/skills  ~/.codex/skills  ~/.cursor/skills  ~/.qoder/skills
@@ -24,6 +25,9 @@ while [[ -L $src ]]; do
 done
 SKILL_DIR="$(cd -P "$(dirname "$src")/.." && pwd)"
 NAME=fullstack-orchestrator
+
+# Model routing has its own script: fullstack-orchestrator models [show|setup|set|reset]
+if [[ ${1:-} == models ]]; then shift; exec bash "$SKILL_DIR/scripts/models.sh" "$@"; fi
 
 hosts=(claude codex)
 [[ -d $HOME/.cursor ]] && hosts+=(cursor)
@@ -114,8 +118,8 @@ case "$cmd" in
       if is_ours "$dest" 2>/dev/null; then echo "  ✓ $h: $dest"; else echo "  ✗ $h: not installed (run install)"; fail=1; fi
     done
     if command -v opencode >/dev/null 2>&1; then
-      # shellcheck source=../config/models.env
-      source "$SKILL_DIR/config/models.env"
+      # shellcheck source=lib.sh
+      source "$SKILL_DIR/scripts/lib.sh"
       echo "Developer model:"
       # The OpenCode background service can answer empty while it starts; retry once.
       models="$(opencode models 2>/dev/null || true)"
