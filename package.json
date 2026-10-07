@@ -14,7 +14,7 @@
     "win32"
   ],
   "bin": {
-    "fullstack-orchestrator": "scripts/install.sh"
+    "fullstack-orchestrator": "bin/cli.js"
   },
   "scripts": {
     "setup": "bash scripts/install.sh install",
@@ -23,6 +23,7 @@
     "doctor": "bash scripts/install.sh doctor"
   },
   "files": [
+    "bin",
     "SKILL.md",
     "README.md",
     "agents",
