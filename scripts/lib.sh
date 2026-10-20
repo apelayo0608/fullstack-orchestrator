@@ -61,13 +61,46 @@ plan_test_cmd() {
 }
 
 # The task's risk (high | low | none) from the "risk" column of plan.md's task table.
+# A worker id ("T03-web") falls back to its parent task ("T03"), so parallel slices
+# inherit the risk of the slice they belong to.
 plan_risk() {
-  local orch=$1 task=$2
+  local orch=$1 task=$2 base risk
   [[ -f $orch/plan.md ]] || return 0
-  awk -F'|' -v t="$task" '
+  risk="$(risk_from_plan "$orch/plan.md" "$task")"
+  base="${task%-*}"
+  if [[ -z $risk && $base != "$task" ]]; then
+    risk="$(risk_from_plan "$orch/plan.md" "$base")"
+  fi
+  printf '%s' "$risk"
+}
+
+risk_from_plan() {
+  awk -F'|' -v t="$2" '
     /^\|/ && !col { for (i = 1; i <= NF; i++) { h = $i; gsub(/[[:space:]]/, "", h); if (tolower(h) == "risk") col = i } next }
     col && /^\|/ { id = $2; gsub(/[[:space:]]/, "", id); if (id == t) { r = $col; gsub(/[[:space:]]/, "", r); print tolower(r); exit } }
-  ' "$orch/plan.md"
+  ' "$1"
+}
+
+# path_in_scope <path> <comma-or-space separated globs>: 0 when the path matches one.
+# Patterns are bash globs, so "client/src/**" and "client/src/*.ts" both work.
+path_in_scope() {
+  local path=$1 scopes=$2 pat
+  for pat in ${scopes//,/ }; do
+    [[ -n $pat ]] || continue
+    # shellcheck disable=SC2053  # deliberate: the pattern comes from the manifest
+    [[ $path == $pat ]] && return 0
+  done
+  return 1
+}
+
+# globs_overlap <a> <b>: rough check that two scope patterns can match the same file.
+# It compares the literal prefixes ("client/src/**" vs "client/**"), which catches the
+# mistakes that matter here: a slice nested inside another, or duplicated scopes.
+globs_overlap() {
+  local a=${1%%/\*\*} b=${2%%/\*\*}
+  a=${a%%\**} b=${b%%\**}
+  a=${a%/} b=${b%/}
+  [[ $a == "$b" || $a == "$b/"* || $b == "$a/"* ]]
 }
 
 # Create .orchestrator/ and keep it out of git without touching tracked files.
