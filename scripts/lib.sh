@@ -151,3 +151,59 @@ resolve_review() {
   elif [[ $mode == delta && -n $ORCH_REVIEW_EFFORT_DELTA ]]; then REV_EFFORT=$ORCH_REVIEW_EFFORT_DELTA; fi
   REV_LABEL="$REV_MODEL${REV_EFFORT:+ ($REV_EFFORT)} via $REV_RUNNER"
 }
+
+# --- Hang watchdog ------------------------------------------------------------
+
+# Kill a process and all its descendants, children first (ps -ef: UID PID PPID on
+# Linux, macOS and Git Bash). Git Bash: taskkill /T also reaches native Windows children.
+kill_tree() {
+  local c
+  for c in $(ps -ef | awk -v p="$1" '$3 == p {print $2}'); do kill_tree "$c"; done
+  [[ -r /proc/$1/winpid ]] && taskkill //F //T //PID "$(<"/proc/$1/winpid")" >/dev/null 2>&1
+  kill "$1" 2>/dev/null
+  return 0
+}
+
+# Progress fingerprint: sizes of the given files plus the working tree of <work>.
+progress_sig() {
+  local work=$1 f; shift
+  for f in "$@"; do wc -c 2>/dev/null < "$f" || echo -; done
+  worktree_tree "$work"
+}
+
+# run_watched <work> <file>... -- <cmd...>: run cmd in the background and check it every
+# ORCH_HANG_CHECK_SECS. No growth in the files and no change in <work> since the last
+# check means it hangs: kill its whole tree and return 124. Otherwise cmd's exit status.
+run_watched() {
+  local work=$1 files=() pid last now waited
+  shift
+  while [[ $1 != -- ]]; do files+=("$1"); shift; done
+  shift
+  (( ORCH_HANG_CHECK_SECS > 0 )) || { "$@"; return; }
+  "$@" & pid=$!
+  last="$(progress_sig "$work" "${files[@]}")"
+  while :; do
+    waited=0
+    while (( waited < ORCH_HANG_CHECK_SECS )) && kill -0 "$pid" 2>/dev/null; do sleep 5; waited=$((waited + 5)); done
+    kill -0 "$pid" 2>/dev/null || { wait "$pid"; return; }
+    now="$(progress_sig "$work" "${files[@]}")"
+    if [[ $now == "$last" ]]; then
+      kill_tree "$pid"; wait "$pid" 2>/dev/null
+      return 124
+    fi
+    last=$now
+  done
+}
+
+# Final text of a `claude -p --output-format stream-json` run (its stream is the watchdog's
+# progress signal; text output stays silent until the end). Falls back to non-JSON lines.
+claude_result() {
+  require_cmd node
+  node -e '
+    let res = null; const other = [];
+    for (const l of require("fs").readFileSync(process.argv[1], "utf8").split("\n")) {
+      try { const j = JSON.parse(l); if (j.type === "result") res = j.result ?? JSON.stringify(j); }
+      catch { if (l.trim()) other.push(l); }
+    }
+    process.stdout.write((res ?? other.join("\n")) + "\n");' "$1"
+}

@@ -115,6 +115,7 @@ All in `config/models.env` (or exported per session):
 | `ORCH_DEV_EFFORT` / `ORCH_DEV_EFFORT_HIGH_RISK` | high / max | Developer thinking level; max only where the risk is high |
 | `ORCH_MAX_CHECK_FIXES` | 2 | Automatic check-failure round trips to the developer before the orchestrator steps in |
 | `ORCH_MAX_FIX_ROUNDS` | 1 | Review fix rounds before escalating to you |
+| `ORCH_HANG_CHECK_SECS` / `ORCH_HANG_RETRIES` | 300 / 2 | Every 5 min, a developer or reviewer run with no new output and no file changes is killed and restarted, up to 2 times (then exit 124); 0 disables |
 | `ORCH_REVIEW_EFFORT_DELTA` | low | Reviewer effort for rounds after the first (fix verification) |
 | `ORCH_REVIEW_EFFORT_LOW` | per-host (low) | Reviewer effort for `risk: low` tasks |
 | `ORCH_SKIP_REVIEW_LINES` | 100 | `risk: low` tasks with fewer changed lines skip model review (0 disables) |

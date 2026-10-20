@@ -25,8 +25,10 @@
 # After the run, check.sh runs the static rules and the test command. Failures go
 # straight back to the developer in the same session, up to ORCH_MAX_CHECK_FIXES
 # times, so no review round is spent on them.
-# Exit codes: 0 done (checks pass or skipped), 4 checks still failing, other
-# non-zero means OpenCode or the checks failed to run.
+# A run with no new output and no file changes for ORCH_HANG_CHECK_SECS (default 300) is
+# killed and restarted, up to ORCH_HANG_RETRIES times.
+# Exit codes: 0 done (checks pass or skipped), 4 checks still failing, 124 the developer
+# kept hanging, other non-zero means the developer CLI or the checks failed to run.
 set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/lib.sh"
 
@@ -86,7 +88,8 @@ dev_cmd() {
     opencode)
       cmd=(opencode run -m "$model_id" ${effort:+--variant "$effort"} --auto -s "$session" --title "orch $task") ;;
     claude)
-      cmd=(claude -p --model "$model_id" ${effort:+--effort "$effort"} --permission-mode bypassPermissions)
+      cmd=(claude -p --model "$model_id" ${effort:+--effort "$effort"} --permission-mode bypassPermissions
+           --verbose --output-format stream-json --include-partial-messages)
       if [[ -f $started_file ]]; then cmd+=(--resume "$session"); else cmd+=(--session-id "$session"); fi ;;
     codex)
       cmd=(codex exec -m "$model_id" ${effort:+-c "model_reasoning_effort=\"$effort\""}
@@ -204,19 +207,38 @@ elif (( watch )); then
   fi
 fi
 
-# run_dev <prompt file> <log>: one developer turn in this task's session.
-run_dev() {
-  local rc
-  dev_cmd
-  set +e
+# dev_once <prompt file> <output>: one developer process; returns the CLI's exit status.
+dev_once() {
   if [[ $runner == opencode ]]; then
-    (cd "$work" && "${cmd[@]}" "$(cat "$1")") 2>&1 | strip_ansi > "$2"
+    (cd "$work" && "${cmd[@]}" "$(cat "$1")") 2>&1 | strip_ansi > "$2"; return "${PIPESTATUS[0]}"
   else
-    (cd "$work" && env -u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT "${cmd[@]}" < "$1") 2>&1 | strip_ansi > "$2"
+    (cd "$work" && env -u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT "${cmd[@]}" < "$1") 2>&1 | strip_ansi > "$2"; return "${PIPESTATUS[0]}"
   fi
-  rc=${PIPESTATUS[0]}
-  set -e
-  if (( rc != 0 )); then
+}
+
+# run_dev <prompt file> <log>: one developer turn in this task's session, restarted on hangs.
+run_dev() {
+  local rc tries=0 raw=$2
+  [[ $runner == claude ]] && raw="$2.jsonl"
+  while :; do
+    dev_cmd
+    set +e
+    run_watched "$work" "$raw" -- dev_once "$1" "$raw"
+    rc=$?
+    set -e
+    (( rc == 124 && tries < ORCH_HANG_RETRIES )) || break
+    tries=$((tries + 1))
+    echo "warning: developer made no progress in ${ORCH_HANG_CHECK_SECS}s; killed it, restarting ($tries/$ORCH_HANG_RETRIES)..." >&2
+    # Resume the killed claude session if it got saved; a fresh --session-id would clash with it.
+    if [[ $runner == claude ]] && find "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects" -name "$session.jsonl" 2>/dev/null | grep -q .; then
+      touch "$started_file"
+    fi
+  done
+  if [[ $runner == claude ]]; then claude_result "$raw" > "$2"; fi
+  if (( rc == 124 )); then
+    echo "error: developer hung (no progress in ${ORCH_HANG_CHECK_SECS}s) after $ORCH_HANG_RETRIES restart(s); see $2" >&2
+    exit 124
+  elif (( rc != 0 )); then
     echo "error: $runner exited with status $rc; see $2" >&2
     exit "$rc"
   fi

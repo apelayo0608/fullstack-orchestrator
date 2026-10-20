@@ -27,8 +27,9 @@
 # what changed since the previous round, plus whether the previous findings are fixed.
 # Writes .orchestrator/reviews/<task>-r<N>.{diff,tree,md} (+ .delta.diff in round 2+).
 # Exit codes: 0 review written (read the verdict), 3 the reviewer modified the
-# working tree (review discarded), 4 checks failed (fix them first), other non-zero
-# means the reviewer CLI failed.
+# working tree (review discarded), 4 checks failed (fix them first), 124 the reviewer
+# kept hanging (no new output for ORCH_HANG_CHECK_SECS, restarted ORCH_HANG_RETRIES
+# times), other non-zero means the reviewer CLI failed.
 set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/lib.sh"
 
@@ -89,7 +90,7 @@ build_cmd() {
       cmd=(claude -p --model "$REV_MODEL" ${REV_EFFORT:+--effort "$REV_EFFORT"}
            --permission-mode dontAsk --allowedTools "$allowed"
            --disallowedTools 'Edit,Write,NotebookEdit'
-           --no-session-persistence --output-format text)
+           --no-session-persistence --verbose --output-format stream-json --include-partial-messages)
       # The diffs live in the main tree's .orchestrator/, outside a task worktree.
       [[ $work != "$repo" ]] && cmd+=(--add-dir "$orch") ;;
     opencode)
@@ -251,19 +252,31 @@ $findings_header
 EOF
 
 echo "Review round $round ($mode, risk $risk) of $task by $reviewer..." >&2
-set +e
-case "$REV_RUNNER" in
-  codex)
-    env -u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT "${cmd[@]}" < "$prompt_file" 2>&1 | strip_ansi > "$log"
-    status=${PIPESTATUS[0]} ;;
-  claude)
-    (cd "$work" && env -u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT "${cmd[@]}" < "$prompt_file" > "$out" 2> "$log")
-    status=$? ;;
-  opencode)
-    (cd "$work" && "${cmd[@]}" "$(cat "$prompt_file")" 2> "$log" | strip_ansi > "$out")
-    status=${PIPESTATUS[0]} ;;
-esac
-set -e
+# review_once: one reviewer process; returns the CLI's exit status.
+review_once() {
+  case "$REV_RUNNER" in
+    codex)
+      env -u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT "${cmd[@]}" < "$prompt_file" 2>&1 | strip_ansi > "$log"
+      return "${PIPESTATUS[0]}" ;;
+    claude)
+      (cd "$work" && env -u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT "${cmd[@]}" < "$prompt_file" > "$out.jsonl" 2> "$log") ;;
+    opencode)
+      (cd "$work" && "${cmd[@]}" "$(cat "$prompt_file")" 2> "$log" | strip_ansi > "$out")
+      return "${PIPESTATUS[0]}" ;;
+  esac
+}
+tries=0
+while :; do
+  set +e
+  run_watched "$work" "$log" "$out" "$out.jsonl" -- review_once
+  status=$?
+  set -e
+  (( status == 124 && tries < ORCH_HANG_RETRIES )) || break
+  tries=$((tries + 1))
+  echo "warning: reviewer made no progress in ${ORCH_HANG_CHECK_SECS}s; killed it, restarting ($tries/$ORCH_HANG_RETRIES)..." >&2
+done
+if [[ $REV_RUNNER == claude && -f $out.jsonl ]]; then claude_result "$out.jsonl" > "$out"; rm -f "$out.jsonl"; fi
+(( status == 124 )) && echo "error: reviewer hung (no progress in ${ORCH_HANG_CHECK_SECS}s) after $ORCH_HANG_RETRIES restart(s)" >&2
 
 after="$(worktree_tree "$work")"
 if [[ $before != "$after" ]]; then
