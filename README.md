@@ -101,6 +101,7 @@ Per-host reviewer defaults used while the runner is `auto` and `review` is empty
 ```
 - The orchestrator writes `plan.md` and the briefs.
 - `delegate-dev.sh` runs the developer in a stable session per task (`ses_orch_<repohash>_<task>` for OpenCode), so fix rounds keep context and get a short prompt.
+- While it runs, a **live change feed** shows the files the developer is creating, editing and deleting, with line counts and optionally the diff hunks — for every runner, not just OpenCode. `--watch` opens it in a second terminal window; `watch-changes.sh` runs it standalone, and every run also writes `.orchestrator/logs/<task>-changes.jsonl`.
 - After each developer run, `check.sh` runs static security rules on the added lines plus the plan's test command, static findings are reported before the tests run, an unchanged tree reuses a passing result, and failures go straight back to the developer (up to `ORCH_MAX_CHECK_FIXES`).
 - `delegate-review.sh` refuses to review work that fails the checks, scales the review to the task's risk (`high` / `low` / `none` in `plan.md`), reviews the whole task diff in round 1 and only the changes since the last round after that, and fails with exit 3 if the reviewer changed any non-ignored file.
 - `task-worktree.sh` gives independent tasks their own git worktrees so they can be developed and reviewed in parallel, then lands each one back into the main working tree.
@@ -120,6 +121,8 @@ All in `config/models.env` (or exported per session):
 | `ORCH_REVIEW_EFFORT_LOW` | per-host (low) | Reviewer effort for `risk: low` tasks |
 | `ORCH_SKIP_REVIEW_LINES` | 100 | `risk: low` tasks with fewer changed lines skip model review (0 disables) |
 | `ORCH_CHECK_CMD` | (plan.md) | Test command for the checks |
+| `ORCH_WATCH_INTERVAL` | 1 | Seconds between polls of the live change feed |
+| `ORCH_LIVE_CHANGES` | (auto) | `1` forces the change feed on without a TTY, `0` forces it off |
 | `ORCH_WORKTREE_ROOT` / `ORCH_WORKTREE_SETUP` | sibling folder / lockfile install | Where task worktrees go and how they get dependencies |
 
 ## Layout
@@ -129,7 +132,8 @@ SKILL.md               orchestrator instructions (both hosts)
 agents/openai.yaml     Codex UI metadata
 config/models.env      model routing
 scripts/               detect-host.sh, delegate-dev.sh, delegate-review.sh, check.sh,
-                       task-worktree.sh, scaffold-resource.sh, lib.sh
+                       task-worktree.sh, scaffold-resource.sh, watch-changes.sh, lib.sh
+tests/                 run.sh, fake-dev.sh (no model CLI needed)
 references/            workflow.md, security.md, architecture.md
 templates/server/      crypto (AES-GCM, key ring, blind index, TOTP, OTP), owner-scoped repo + use cases,
                        auth/MFA services, middleware, routes, app, SQL migration, IDOR test suite

@@ -15,6 +15,7 @@ All orchestration files live in `<repo>/.orchestrator/`. The scripts add it to `
   reviews/T01-r1.md       reviewer findings (script)
   worktrees/T03.path      task worktree location, .landed / .patch after landing (script)
   logs/                   full prompts and transcripts (script)
+  logs/T01-changes.jsonl  file-level change events from the live feed (script)
 ```
 
 ## 1. Plan (`.orchestrator/plan.md`)
@@ -94,12 +95,14 @@ Runs can take many minutes. In Claude Code, run it with `run_in_background` and 
 
 **Automated checks.** After the developer finishes, the script runs `check.sh`: static rules on the lines the task added (`z.object` in server code, actor ids from `req.body/query/params`, interpolated SQL, `WHERE id = $n` without `owner_id` in repositories, `/api` routers without `requireMfa`, `.only`/`.skip`, `@ts-ignore`/`any`, `dangerouslySetInnerHTML`, secret-looking `VITE_*` vars, new routes without an IDOR test), then the `Test commands:` line. Static findings are reported before the test command runs, so they go back to the developer without waiting for the suite; the tests run once the static rules are clean, and a tree unchanged since the last PASS reuses it. Failures go straight back to the developer in the same session, up to `ORCH_MAX_CHECK_FIXES` (default 2) times. Exit 4 / `CHECKS: FAIL` means they still fail: write a fix brief from the check report. A line the developer marks `orch-allow: <reason>` is skipped by the rules; the reviewer is told to judge those exemptions.
 
-**Live view.** Let the user watch the developer work (OpenCode runner only; claude and codex runners have no live view). The OpenCode TUI attaches to the same background service as the run:
-- Claude desktop app (terminal-panel tools available): right after starting the background run, open a terminal tab in the panel and run the `watch` command that `delegate-dev.sh --task T02 --dry-run` prints (`cd <repo> && opencode -s <session>`). Reuse that tab for fix rounds of the same task.
-- Anywhere else on macOS: add `--watch`; the script opens a Terminal.app window with the TUI.
-- Otherwise: tell the user the `Watch live:` command the script prints on stderr.
+**Live changes.** Every run can show what the developer is writing, whatever the runner.
+- `delegate-dev.sh --task T02 --live` draws a live panel: one line per changed file with status and ± lines, refreshed every `ORCH_WATCH_INTERVAL` (1s). It is the default when stdout is a terminal; `--no-live` turns it off and `ORCH_LIVE_CHANGES=1|0` forces it.
+- `--watch` opens a second terminal window with the same feed plus the diff hunks (`--full`). It works on macOS, Windows (Git Bash) and Linux desktops; if no window can open it prints the command instead. `--tui` keeps the OpenCode TUI (opencode runner only) — typing there steers the developer.
+- Standalone: `watch-changes.sh --task T02` (`--summary` for a one-line result, `--once`, `--json`, `--full`, `--interval N`).
+- The feed compares the task's baseline tree with a snapshot of the working tree — the same comparison `check.sh` makes — so what you see is exactly what will be checked.
+- Every run appends file-level events to `.orchestrator/logs/<task>-changes.jsonl`, and prints `CHANGES: <n> file(s), +a -d` when it ends.
 
-Tell the user that typing in the live view sends messages into the developer's session. You do not need the view yourself; you still read the `DEV REPORT`.
+Tell the user that typing in the TUI sends messages into the developer's session. You do not need the feed yourself; you still read the `DEV REPORT`.
 
 - `Status: blocked` or open questions → answer them in a fix brief (or ask the user if it is their call), then re-delegate.
 - Never patch the code yourself, even for one line.
