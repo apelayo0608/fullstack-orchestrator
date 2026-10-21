@@ -1,15 +1,21 @@
 #!/usr/bin/env bash
 # Hand one task brief to the full-stack developer (DeepSeek through OpenCode).
 #
-# Usage: delegate-dev.sh --task T01 [--brief PATH] [--repo DIR] [--new-session] [--no-check] [--watch] [--dry-run]
+# Usage: delegate-dev.sh --task T01 [--brief PATH] [--repo DIR] [--new-session] [--no-check]
+#                         [--live|--no-live] [--watch] [--tui] [--dry-run]
 #
 #   --task         Task id, e.g. T01. The brief defaults to .orchestrator/tasks/<task>.md.
 #   --brief        Brief to send instead, e.g. .orchestrator/tasks/T01-fix1.md for a fix round.
 #   --repo         Any path inside the target git repo (default: current directory).
 #   --new-session  Start a fresh OpenCode session instead of continuing this task's session.
 #   --no-check     Skip the automated checks (check.sh) after the run.
-#   --watch        Open a Terminal.app window (macOS) with the OpenCode TUI on this task's
-#                  session, so you can watch the developer live. Typing there steers it.
+#   --live         Show the files the developer is changing, as it changes them (watch-changes.sh).
+#                  Default when stdout is a terminal; ORCH_LIVE_CHANGES=1|0 forces it.
+#   --no-live      Do not run the change feed.
+#   --watch        Open a terminal window with the live change feed (--full) so you can watch
+#                  on a second screen. Works on macOS, Windows (Git Bash) and Linux desktops.
+#   --tui          With --watch and the opencode runner: open the OpenCode TUI instead, which
+#                  attaches to the same session and lets you type into it.
 #   --dry-run      Print the command and prompt location without running anything.
 #
 # Provider, model and thinking level come from ORCH_DEV_RUNNER (opencode | claude | codex),
@@ -32,7 +38,7 @@
 set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/lib.sh"
 
-task="" brief="" repo="." new_session=0 no_check=0 watch=0 dry_run=0
+task="" brief="" repo="." new_session=0 no_check=0 watch=0 dry_run=0 live="auto" tui=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --task) task=${2:?}; shift 2 ;;
@@ -40,12 +46,23 @@ while [[ $# -gt 0 ]]; do
     --repo) repo=${2:?}; shift 2 ;;
     --new-session) new_session=1; shift ;;
     --no-check) no_check=1; shift ;;
+    --live) live=1; shift ;;
+    --no-live) live=0; shift ;;
     --watch) watch=1; shift ;;
+    --tui) tui=1; shift ;;
     --dry-run) dry_run=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) die "unknown argument: $1 (see --help)" ;;
   esac
 done
+
+# The feed is on by default only when a human is looking at the terminal.
+if [[ $live == auto ]]; then
+  if [[ -t 1 ]]; then live=1; else live=0; fi
+fi
+[[ ${ORCH_LIVE_CHANGES:-} == 1 ]] && live=1
+[[ ${ORCH_LIVE_CHANGES:-} == 0 ]] && live=0
+(( tui )) && watch=1
 
 [[ -n $task ]] || die "--task is required"
 check_task_id "$task"
@@ -97,9 +114,14 @@ dev_cmd() {
   esac
 }
 dev_cmd
-# The OpenCode TUI attaches to the same background service as `opencode run`, so it shows the run live.
+# Two ways to watch. The change feed works for every runner and shows the files and diffs;
+# the OpenCode TUI attaches to the same background service as `opencode run` and also lets
+# you type into the session.
+feed_cmd="$(printf %q "$SCRIPT_DIR/watch-changes.sh") --task $(printf %q "$task") --repo $(printf %q "$repo") --full"
 watch_cmd=""
-[[ $runner == opencode ]] && watch_cmd="cd $(printf %q "$work") && opencode -s $(printf %q "$session")"
+if [[ -z ${ORCH_DEV_CMD:-} && $runner == opencode ]]; then
+  watch_cmd="cd $(printf %q "$work") && opencode -s $(printf %q "$session")"
+fi
 
 if (( dry_run )); then
   echo "repo:    $repo"
@@ -110,11 +132,12 @@ if (( dry_run )); then
   echo "prompt:   $( ((resumed)) && echo 'short (resumed session)' || echo 'full contract')"
   echo "command: (cd $work && ${cmd[*]} \"<contract + brief>\")"
   echo "log:     $log"
-  echo "watch:   ${watch_cmd:-n/a ($runner has no live view)}"
+  echo "changes: $( ((live)) && echo 'feed on (watch-changes.sh)' || echo 'off (--live to enable)')"
+  echo "watch:   $( ((tui)) && [[ -n $watch_cmd ]] && echo "$watch_cmd" || echo "$feed_cmd")"
   exit 0
 fi
 
-require_cmd "$runner"
+[[ -n ${ORCH_DEV_CMD:-} ]] || require_cmd "$runner"
 ensure_workspace "$repo"
 [[ -f "$orch/baselines/$task.tree" ]] || worktree_tree "$work" > "$orch/baselines/$task.tree"
 echo "$session" > "$session_file"
@@ -191,25 +214,72 @@ EOF
 fi
 
 echo "Delegating $task to $model_id${effort:+ ($effort)} via $runner (session $session, $( ((resumed)) && echo 'short prompt' || echo 'full contract'))..." >&2
-[[ -n $watch_cmd ]] && echo "Watch live: $watch_cmd" >&2
-if (( watch )) && [[ -z $watch_cmd ]]; then
-  echo "warning: --watch only works with the opencode runner" >&2
-elif (( watch )); then
-  if [[ $(uname) == Darwin ]] && command -v osascript >/dev/null 2>&1; then
-    # Open after the run has started so it creates the session with its title.
-    ( sleep 3
-      osascript -e 'on run argv' -e 'tell application "Terminal" to do script (item 1 of argv)' \
-        -e 'tell application "Terminal" to activate' -e 'end run' "$watch_cmd" >/dev/null 2>&1 \
-        || echo "warning: could not open the watch window; run the Watch live command yourself" >&2
-    ) &
-  else
-    echo "warning: --watch needs macOS Terminal; run the Watch live command yourself" >&2
+echo "Watch changes: $feed_cmd" >&2
+[[ -n $watch_cmd ]] && echo "Watch session: $watch_cmd  (typing there steers the developer)" >&2
+
+# open_window <command>: a terminal window for the feed, on macOS, Windows (Git Bash) and
+# Linux desktops. Returns non-zero when no window could be opened; the caller then prints
+# the command instead.
+open_window() {
+  local cmd=$1 t
+  case "$(uname -s)" in
+    Darwin)
+      if command -v osascript >/dev/null 2>&1; then
+        osascript -e 'on run argv' -e 'tell application "Terminal" to do script (item 1 of argv)' \
+          -e 'tell application "Terminal" to activate' -e 'end run' "$cmd" >/dev/null 2>&1 && return 0
+      fi ;;
+    MINGW*|MSYS*|CYGWIN*)
+      if command -v wt >/dev/null 2>&1; then
+        wt bash -lc "$cmd" >/dev/null 2>&1 && return 0
+      fi
+      cmd //c start "" bash -lc "$cmd" >/dev/null 2>&1 && return 0 ;;
+    Linux)
+      for t in x-terminal-emulator gnome-terminal konsole xfce4-terminal xterm; do
+        command -v "$t" >/dev/null 2>&1 || continue
+        case "$t" in
+          gnome-terminal) "$t" -- bash -lc "$cmd" >/dev/null 2>&1 && return 0 ;;
+          *) "$t" -e bash -lc "$cmd" >/dev/null 2>&1 && return 0 ;;
+        esac
+      done ;;
+  esac
+  return 1
+}
+
+if (( watch )); then
+  want=$feed_cmd
+  (( tui )) && [[ -n $watch_cmd ]] && want=$watch_cmd
+  if ! open_window "$want"; then
+    echo "warning: could not open a terminal window; run this yourself:" >&2
+    echo "  $want" >&2
   fi
 fi
 
+# --- Live change feed -------------------------------------------------------
+# The developer's own output goes to its log, so the terminal is free for the feed.
+feed_pid="" pid_file="$orch/sessions/$task.run.pid"
+start_feed() {
+  (( live )) || return 0
+  mkdir -p "$orch/logs" "$orch/sessions"
+  echo "$$" > "$pid_file"
+  "$SCRIPT_DIR/watch-changes.sh" --task "$task" --repo "$repo" --follow &
+  feed_pid=$!
+}
+stop_feed() {
+  [[ -n ${feed_pid:-} ]] || return 0
+  kill "$feed_pid" 2>/dev/null || true
+  wait "$feed_pid" 2>/dev/null || true
+  feed_pid=""
+  rm -f "$pid_file"
+}
+trap stop_feed EXIT
+
 # dev_once <prompt file> <output>: one developer process; returns the CLI's exit status.
 dev_once() {
-  if [[ $runner == opencode ]]; then
+  # ORCH_DEV_CMD replaces the developer command entirely (tests, harnesses, dry runs):
+  # the prompt arrives on stdin and the command runs inside the task's workdir.
+  if [[ -n ${ORCH_DEV_CMD:-} ]]; then
+    (cd "$work" && bash -c "$ORCH_DEV_CMD") < "$1" 2>&1 | strip_ansi > "$2"; return "${PIPESTATUS[0]}"
+  elif [[ $runner == opencode ]]; then
     (cd "$work" && "${cmd[@]}" "$(cat "$1")") 2>&1 | strip_ansi > "$2"; return "${PIPESTATUS[0]}"
   else
     (cd "$work" && env -u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT "${cmd[@]}" < "$1") 2>&1 | strip_ansi > "$2"; return "${PIPESTATUS[0]}"
@@ -245,7 +315,9 @@ run_dev() {
   touch "$started_file"
 }
 
+start_feed
 run_dev "$prompt_file" "$log"
+stop_feed
 
 check_status=skipped report=""
 if (( !no_check )); then
@@ -276,7 +348,9 @@ if (( !no_check )); then
         echo
         cat "$report"
       } > "$prompt_file"
+      start_feed
       run_dev "$prompt_file" "$log"
+      stop_feed
     done
   fi
 fi
@@ -287,6 +361,10 @@ echo "session: $session"
 echo
 last_section "$log" "DEV REPORT"
 echo
+if (( live )); then
+  "$SCRIPT_DIR/watch-changes.sh" --task "$task" --repo "$repo" --summary 2>/dev/null || true
+  echo
+fi
 echo "Working tree changes (git status --short):"
 git -C "$work" status --short
 echo

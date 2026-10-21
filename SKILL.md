@@ -120,9 +120,10 @@ Defaults to state in every brief that touches them:
 
 | Path | Purpose |
 |---|---|
-| `scripts/delegate-dev.sh` | Brief → developer (opencode, claude or codex) in a per-task session, short prompt on fix rounds; records the task baseline; runs `check.sh` and loops failures back to the developer; prints the DEV REPORT; `--watch` opens a live OpenCode TUI |
+| `scripts/delegate-dev.sh` | Brief → developer (opencode, claude or codex) in a per-task session, short prompt on fix rounds; records the task baseline; runs `check.sh` and loops failures back to the developer; prints the DEV REPORT; `--live` shows a live change feed, `--watch` opens it in a second window |
 | `scripts/delegate-review.sh` | Task diff → cross-vendor reviewer, read-only, with a before/after working-tree guard; check gate, risk tiers, delta re-reviews |
 | `scripts/check.sh` | Static security/quality rules on the task's added lines + the plan's test command |
+| `scripts/watch-changes.sh` | Live view of a delegated task's file changes (any runner): panel, `--summary`, `--json`, `--full` |
 | `scripts/task-worktree.sh` | Per-task git worktrees for parallel tasks: create, land, remove, list |
 | `scripts/scaffold-resource.sh` | Developer-run generator for an owner-scoped CRUD slice from the notes templates |
 | `scripts/detect-host.sh` | Prints `claude` or `codex` (override with `ORCH_HOST`) |

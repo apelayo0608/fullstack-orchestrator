@@ -20,7 +20,8 @@
     "setup": "bash scripts/install.sh install",
     "setup:copy": "bash scripts/install.sh install --copy",
     "uninstall-skill": "bash scripts/install.sh uninstall",
-    "doctor": "bash scripts/install.sh doctor"
+    "doctor": "bash scripts/install.sh doctor",
+    "test": "bash tests/run.sh"
   },
   "files": [
     "bin",
@@ -30,6 +31,7 @@
     "config",
     "references",
     "scripts",
-    "templates"
+    "templates",
+    "tests"
   ]
 }
