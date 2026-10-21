@@ -2,7 +2,8 @@
 # Give a task its own git worktree so independent tasks can be developed and
 # reviewed in parallel, then land the result back in the main working tree.
 #
-# Usage: task-worktree.sh <create|land|remove|list> [--task T03] [--repo DIR] [--no-install] [--force]
+# Usage: task-worktree.sh <create|land|remove|list> [--task T03] [--repo DIR] [--base-tree TREE]
+#                          [--no-install] [--threeway] [--force]
 #
 #   create  New worktree for the task, starting from the main tree's CURRENT state
 #           (uncommitted changes included, via a snapshot commit; no branch, HEAD
@@ -17,6 +18,10 @@
 #   list    Show registered task worktrees.
 #
 #   --no-install  create: skip the dependency install.
+#   --base-tree   create: start from this tree object instead of the main tree's current
+#                 state. Used by delegate-parallel.sh so every worker of one task starts
+#                 from the same base and their diffs stay mergeable.
+#   --threeway    land: apply with 3-way merge semantics (git apply --3way).
 #   --force       remove: discard an unlanded worktree.
 #
 # Worktrees live in ORCH_WORKTREE_ROOT (default: <repo parent>/.<repo name>-orch/).
@@ -28,12 +33,14 @@ set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/lib.sh"
 
 action="${1:-}"; [[ $# -gt 0 ]] && shift
-task="" repo="." install=1 force=0
+task="" repo="." install=1 force=0 base_tree="" threeway=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --task) task=${2:?}; shift 2 ;;
     --repo) repo=${2:?}; shift 2 ;;
+    --base-tree) base_tree=${2:?}; shift 2 ;;
     --no-install) install=0; shift ;;
+    --threeway) threeway=1; shift ;;
     --force) force=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) die "unknown argument: $1 (see --help)" ;;
@@ -68,13 +75,16 @@ case "$action" in
     [[ -e $wt ]] && die "$wt already exists"
     mkdir -p "$wt_root"
 
-    tree="$(worktree_tree "$main")"
+    if [[ -n $base_tree ]]; then tree=$base_tree; else tree="$(worktree_tree "$main")"; fi
     parent=(); git -C "$main" rev-parse -q --verify HEAD >/dev/null && parent=(-p HEAD)
     snapshot="$(GIT_AUTHOR_NAME=orchestrator GIT_AUTHOR_EMAIL=orchestrator@localhost \
                 GIT_COMMITTER_NAME=orchestrator GIT_COMMITTER_EMAIL=orchestrator@localhost \
                 git -C "$main" commit-tree "$tree" "${parent[@]}" -m "orchestrator snapshot for $task")"
     git -C "$main" worktree add --detach "$wt" "$snapshot" >/dev/null
     echo "$wt" > "$rec"
+    # The snapshot commit lets delegate-parallel.sh merge worker trees with a real
+    # three-way merge: every worker's commit shares this ancestor.
+    echo "$snapshot" > "$orch/worktrees/$task.snapshot"
     # The developer's baseline is the snapshot, so the task diff starts clean.
     echo "$tree" > "$orch/baselines/$task.tree"
 
@@ -119,7 +129,14 @@ case "$action" in
       echo "warning: $task's latest review is not APPROVE${last:+ ($last)}" >&2
     fi
     if git -C "$main" apply --check "$patch" 2>"$orch/logs/$task-land.log"; then
-      git -C "$main" apply "$patch"
+      if (( threeway )); then
+        git -C "$main" apply --3way "$patch" || {
+          echo "CONFLICT (3-way): $task did not merge cleanly; see $orch/logs/$task-land.log" >&2
+          exit 5
+        }
+      else
+        git -C "$main" apply "$patch"
+      fi
       touch "$orch/worktrees/$task.landed"
       echo "landed $task into $main (working tree only; nothing staged or committed)"
       git -C "$main" apply --stat "$patch"
@@ -138,7 +155,7 @@ case "$action" in
       die "$task is not landed; run 'land' first, or pass --force to discard its work"
     fi
     if [[ -d $wt ]]; then git -C "$main" worktree remove --force "$wt"; else git -C "$main" worktree prune; fi
-    rm -f "$rec" "$orch/worktrees/$task.landed"
+    rm -f "$rec" "$orch/worktrees/$task.landed" "$orch/worktrees/$task.snapshot"
     echo "removed $wt"
     ;;
 esac

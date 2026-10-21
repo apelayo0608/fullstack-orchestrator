@@ -125,6 +125,7 @@ Defaults to state in every brief that touches them:
 | `scripts/check.sh` | Static security/quality rules on the task's added lines + the plan's test command |
 | `scripts/watch-changes.sh` | Live view of a delegated task's file changes (any runner): panel, `--summary`, `--json`, `--full` |
 | `scripts/task-worktree.sh` | Per-task git worktrees for parallel tasks: create, land, remove, list |
+| `scripts/delegate-parallel.sh` | One task → several developers at once (scoped slices + shared contract), static checks per worker, 3-way integration, one full check |
 | `scripts/scaffold-resource.sh` | Developer-run generator for an owner-scoped CRUD slice from the notes templates |
 | `scripts/detect-host.sh` | Prints `claude` or `codex` (override with `ORCH_HOST`) |
 | `config/models.env` | Model ids, efforts, fix-round limits, check command, worktree settings |

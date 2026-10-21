@@ -105,6 +105,7 @@ Per-host reviewer defaults used while the runner is `auto` and `review` is empty
 - After each developer run, `check.sh` runs static security rules on the added lines plus the plan's test command, static findings are reported before the tests run, an unchanged tree reuses a passing result, and failures go straight back to the developer (up to `ORCH_MAX_CHECK_FIXES`).
 - `delegate-review.sh` refuses to review work that fails the checks, scales the review to the task's risk (`high` / `low` / `none` in `plan.md`), reviews the whole task diff in round 1 and only the changes since the last round after that, and fails with exit 3 if the reviewer changed any non-ignored file.
 - `task-worktree.sh` gives independent tasks their own git worktrees so they can be developed and reviewed in parallel, then lands each one back into the main working tree.
+- `delegate-parallel.sh` fans **one task** out to several developers at once (e.g. a frontend and a backend slice), pinned to the same base tree, with disjoint file scopes and a shared contract inlined into each brief. It runs the static checks per worker, merges the slices three-way into a `<task>-int` worktree, and runs the full test command once on the merged result. See `references/parallel.md`.
 - `scaffold-resource.sh` (run by the developer) generates a full owner-scoped CRUD slice from the notes templates.
 
 ## Speed settings
@@ -122,6 +123,8 @@ All in `config/models.env` (or exported per session):
 | `ORCH_SKIP_REVIEW_LINES` | 100 | `risk: low` tasks with fewer changed lines skip model review (0 disables) |
 | `ORCH_CHECK_CMD` | (plan.md) | Test command for the checks |
 | `ORCH_WATCH_INTERVAL` | 1 | Seconds between polls of the live change feed |
+| `ORCH_MAX_PARALLEL` | 2 | Developers running at once in `delegate-parallel.sh` |
+| `ORCH_STAGGER_SECS` | 3 | Pause between worker starts, to avoid provider rate limits |
 | `ORCH_LIVE_CHANGES` | (auto) | `1` forces the change feed on without a TTY, `0` forces it off |
 | `ORCH_WORKTREE_ROOT` / `ORCH_WORKTREE_SETUP` | sibling folder / lockfile install | Where task worktrees go and how they get dependencies |
 
@@ -132,9 +135,10 @@ SKILL.md               orchestrator instructions (both hosts)
 agents/openai.yaml     Codex UI metadata
 config/models.env      model routing
 scripts/               detect-host.sh, delegate-dev.sh, delegate-review.sh, check.sh,
-                       task-worktree.sh, scaffold-resource.sh, watch-changes.sh, lib.sh
-tests/                 run.sh, fake-dev.sh (no model CLI needed)
-references/            workflow.md, security.md, architecture.md
+                       task-worktree.sh, delegate-parallel.sh, scaffold-resource.sh,
+                       watch-changes.sh, lib.sh
+tests/                 run.sh, parallel.sh, fake-dev.sh (no model CLI needed)
+references/            workflow.md, security.md, architecture.md, parallel.md
 templates/server/      crypto (AES-GCM, key ring, blind index, TOTP, OTP), owner-scoped repo + use cases,
                        auth/MFA services, middleware, routes, app, SQL migration, IDOR test suite
 templates/client/      vite.config.ts, api client, query client, Zustand UI store, auth hooks, notes CRUD hooks,
