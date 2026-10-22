@@ -71,7 +71,8 @@ If your own session is not running the orchestrator model and effort above, tell
 
 Read `references/workflow.md` before the first task. It holds the plan, brief and fix-brief templates, the triage rules, and the parallel workflow.
 
-1. **Plan.** Explore the repo, then write `.orchestrator/plan.md` as small vertical tasks (T01, T02, …). Each task has acceptance criteria, its security requirements, and a **risk** (`high`, `low` or `none`; see below). Fill in the `Test commands:` line: `check.sh` runs it. Show the plan to the user first when the scope is new or large.
+1. **Frontend choice.** For a new app (no web client yet), ask the user once, with the host's question tool if it has one: **Vite** (React SPA, recommended default) or **Next.js** (only for SSR/SEO). Skip the question when the project already has a client (use what's there) or the user already named one. Record the answer under `Stack decisions:` in `plan.md`.
+   **Plan.** Explore the repo, then write `.orchestrator/plan.md` as small vertical tasks (T01, T02, …). Each task has acceptance criteria, its security requirements, and a **risk** (`high`, `low` or `none`; see below). Fill in the `Test commands:` line: `check.sh` runs it. Show the plan to the user first when the scope is new or large.
 2. **Brief.** Write `.orchestrator/tasks/Txx.md`: goal, context files, which `templates/` to start from, requirements, security requirements, acceptance criteria, out of scope. For a new user-owned CRUD resource, tell the developer to run `scripts/scaffold-resource.sh --name <singular>` first.
 3. **Develop.** Run `scripts/delegate-dev.sh --task Txx`. It can run for many minutes: background it in Claude Code, or give it a long timeout in Codex. Open the live view for the user (see `references/workflow.md` §3). When it finishes, the script has already run `check.sh` and sent failures back to the developer up to `ORCH_MAX_CHECK_FIXES` times. Read the `DEV REPORT` and the `CHECKS:` line. Exit 4 means checks still fail: write a fix brief from the check report and delegate again; do not review yet.
 4. **Review.** Run `scripts/delegate-review.sh --task Txx --host <claude|codex>`. It takes the risk from `plan.md` and refuses (exit 4) if the checks fail. Round 1 reviews the whole task diff; later rounds review only the changes since the previous round and whether its findings were fixed. Use `--full` for a final full pass only when the fixes were large or structural.
@@ -110,7 +111,7 @@ Defaults to state in every brief that touches them:
   - Password → `mfa_pending` session → TOTP (RFC 6238, ±1 step, replay guard, encrypted secret) or email OTP (HMAC-hashed, 10 min, 5 tries, single use, rate-limited) → rotated full session.
   - `requireAuth` + `requireMfa` on every app route.
 - **Stack:**
-  - React + Vite SPA (Next.js only on request) with the Vite proxy `/api → :4000`.
+  - React + Vite SPA by default, with the Vite proxy `/api → :4000`; Next.js if the user picked it in §3 step 1.
   - TanStack Query for server state; Zustand for UI state only.
   - Express 5 with Clean Architecture (domain ← application ← infrastructure/interface).
   - PostgreSQL with plain SQL migrations.

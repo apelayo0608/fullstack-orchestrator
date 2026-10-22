@@ -1,7 +1,7 @@
 # Stack and architecture
 
 Default stack: **React + Vite SPA** (TypeScript, Tailwind CSS v4, Motion, Zustand, TanStack Query) → **Vite proxy** → **Express 5** API (TypeScript, Clean Architecture) → **PostgreSQL**.
-Use **Next.js** only when the user asks for it (SSR/SEO). Express stays the API either way (see §6).
+For a new app the orchestrator asks the user to pick Vite (default) or **Next.js** (SSR/SEO). Express stays the API either way (see §6).
 
 ## 1. Repository layout
 
@@ -104,7 +104,7 @@ New user-owned CRUD resources start from `scripts/scaffold-resource.sh --name <s
 - Web: vitest + Testing Library for components and hooks. Add Playwright for critical flows (login + MFA) when requested.
 - Every task must pass `typecheck`, `lint` (ESLint + typescript-eslint), and `test` before the developer reports done.
 
-## 6. Next.js variant (only on request)
+## 6. Next.js variant (when the user picks it)
 - Next.js App Router renders the UI. Express remains the API; Next does not talk to Postgres directly.
 - Replace the Vite proxy with `rewrites()` in `next.config.ts`: `{ source: '/api/:path*', destination: 'http://localhost:4000/api/:path*' }`, so the cookie stays first-party.
 - TanStack Query and Zustand live in client components (`'use client'` providers). Server components may fetch through the same `/api` with the incoming cookie forwarded.
