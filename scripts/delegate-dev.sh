@@ -83,7 +83,7 @@ if (( new_session )); then rm -f "$started_file"; fi
 if (( !new_session )) && [[ -f $session_file ]]; then
   session="$(<"$session_file")"
 else
-  hash="$(printf '%s' "$work$task" | shasum -a 256 | cut -c1-32)"
+  hash="$(printf '%s' "$work$task" | sha256 | cut -c1-32)"
   case "$runner" in
     claude) # claude needs a UUID
       session="${hash:0:8}-${hash:8:4}-4${hash:13:3}-a${hash:17:3}-${hash:20:12}" ;;

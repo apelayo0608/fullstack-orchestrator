@@ -58,8 +58,12 @@ ok "delegate-dev ran the stub and reported 3 changed files"
 cd "$d"
 ( sleep 0.6; printf 'later\n' > later.txt ) &
 bg=$!
-watch_out="$(timeout 5 "$ROOT/scripts/watch-changes.sh" --task T01 --interval 1 2>/dev/null || true)"
-wait "$bg" 2>/dev/null || true
+# No `timeout`: macOS doesn't ship it.
+"$ROOT/scripts/watch-changes.sh" --task T01 --interval 1 > "$TMP/watch.out" 2>/dev/null &
+w=$!
+sleep 4; kill "$w" 2>/dev/null || true
+wait "$w" "$bg" 2>/dev/null || true
+watch_out="$(<"$TMP/watch.out")"
 grep -q 'later.txt' <<< "$watch_out" || fail "live feed missed later.txt; got: $watch_out"
 ok "live feed reported a file created mid-run"
 

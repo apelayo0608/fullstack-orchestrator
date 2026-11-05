@@ -90,11 +90,14 @@ worktree_tree() {
   rm -f "$tmp"
 }
 
+# sha256 of stdin as hex. shasum is missing on some Linux images; sha256sum on macOS.
+sha256() { if command -v shasum >/dev/null 2>&1; then shasum -a 256; else sha256sum; fi | cut -d' ' -f1; }
+
 # OpenCode session ids must start with "ses". One stable session per repo + task,
 # so fix rounds keep the developer's context.
 session_id() {
   local repo=$1 task=$2 hash
-  hash="$(printf '%s' "$repo" | shasum -a 256 | cut -c1-8)"
+  hash="$(printf '%s' "$repo" | sha256 | cut -c1-8)"
   printf 'ses_orch_%s_%s' "$hash" "${task//-/_}"
 }
 
