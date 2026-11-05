@@ -47,7 +47,7 @@ npm blocks install scripts on global installs, so run `fullstack-orchestrator in
 
 **Cursor and Qoder** read the same `SKILL.md` format from `~/.cursor/skills` and `~/.qoder/skills`. The installer links into those too when `~/.cursor` or `~/.qoder` exists. To limit which tools get it, use `fullstack-orchestrator install --only=cursor,qoder` or `npm run setup -- --only=...`. In those tools the skill picks the reviewer from the orchestrator's model: Claude → GPT reviews, GPT → Opus reviews.
 
-Requirements: `opencode` (logged in to the `opencode-go` provider), `codex`, `claude`, `git`, `perl`, and `shasum` on PATH.
+Requirements: `opencode` (logged in to the `opencode-go` provider), `codex`, `claude`, `git`, `perl`, and `shasum` or `sha256sum` on PATH. On Windows, Git Bash.
 
 ## Launch
 

@@ -114,7 +114,7 @@ case "$cmd" in
     fail=0
     echo "CLIs:"
     check git "required"; check opencode "developer"; check codex "GPT reviewer / Codex host"
-    check claude "Opus reviewer / Claude host"; check perl "log cleanup"; check shasum "session ids"
+    check claude "Opus reviewer / Claude host"; check perl "log cleanup"; command -v shasum >/dev/null 2>&1 || check sha256sum "session ids"
     echo "Links:"
     for h in "${all_hosts[@]}"; do
       dest="$(skills_dir "$h")/$NAME"
