@@ -1,6 +1,6 @@
 ---
 name: fullstack-orchestrator
-description: Plan-and-delegate orchestration for full-stack web apps. The orchestrator (Claude Opus 5.5 or GPT 6.1 Sol) only plans, briefs, triages and verifies; a configurable developer model (default via OpenCode) writes all code; the other vendor's model (GPT 6.1 Sol under Claude, Opus 5.5 under Codex) reviews read-only. Enforces React/Vite (or Next) + Express + PostgreSQL + Zustand/TanStack Query + Clean Architecture + MFA (email OTP and TOTP) + Tailwind + Motion, with AES-256-GCM field encryption and IDOR protection by default. Use when the user invokes fullstack-orchestrator, or asks to build, add a feature to, or fix a web app (React/Vite/Next, Express, Postgres or similar). Unless invoked by name, it first asks the user whether to use the orchestrated team or the current agent alone.
+description: Plan-and-delegate orchestration for full-stack web apps. The orchestrator (whatever model the host session runs) only plans, briefs, triages and verifies; a configurable developer model (default via OpenCode) writes all code; the other vendor's model (GPT 6.1 Sol under Claude, Opus 5.5 under Codex) reviews read-only. Enforces React/Vite (or Next) + Express + PostgreSQL + Zustand/TanStack Query + Clean Architecture + MFA (email OTP and TOTP) + Tailwind + Motion, with AES-256-GCM field encryption and IDOR protection by default. Use when the user invokes fullstack-orchestrator, or asks to build, add a feature to, or fix a web app (React/Vite/Next, Express, Postgres or similar). Unless invoked by name, it first asks the user whether to use the orchestrated team or the current agent alone.
 ---
 
 # Fullstack Orchestrator
@@ -39,8 +39,8 @@ Run `scripts/detect-host.sh`. You also know which agent you are. If detection fa
 
 | You are | Orchestrator (plan and delegate only) | Full-stack developer | Reviewer / bug hunter (read-only) |
 |---|---|---|---|
-| **Claude Code** (`--host claude`) | Claude Opus 5.5, effort medium | `ORCH_DEV_RUNNER` / `ORCH_DEV_MODEL` (default OpenCode), thinking high, max for `risk: high` | GPT 6.1 Sol, effort medium, via `codex exec -s read-only` (default) |
-| **Codex** (`--host codex`) | GPT 6.1 Sol, effort medium | same developer | Claude Opus 5.5, effort medium, via `claude -p` with edit tools denied (default) |
+| **Claude Code** (`--host claude`) | the model this session runs | `ORCH_DEV_RUNNER` / `ORCH_DEV_MODEL` (default OpenCode), thinking high, max for `risk: high` | GPT 6.1 Sol, effort medium, via `codex exec -s read-only` (default) |
+| **Codex** (`--host codex`) | the model this session runs | same developer | Claude Opus 5.5, effort medium, via `claude -p` with edit tools denied (default) |
 
 **Other tools (Cursor, Qoder, …):** `detect-host.sh` can't identify them, so choose `--host` by the model *you* are running as. The reviewer is always the other vendor:
 - A Claude model → `--host claude` (GPT reviews).
@@ -49,11 +49,9 @@ Run `scripts/detect-host.sh`. You also know which agent you are. If detection fa
 
 The scripts are plain shell, so they run in any agent that has a terminal. If that agent's sandbox blocks network access, the user must allow the delegate scripts to run outside it.
 
-Every role has a provider, a model and a thinking level, and the user can change each: `fullstack-orchestrator models` shows them, `models set dev` / `models set review` pick provider (opencode, claude or codex), model and thinking level (saved per user; defaults in `config/models.env`). The reviewer's provider is `auto` (the other vendor of the host) unless the user forces one. Do not hardcode ids here; read them from `models`.
+The developer and the reviewer each have a provider, a model and a thinking level, and the user can change each: `fullstack-orchestrator models` (or the `orchestrator-models` skill) shows them, `models set dev` / `models set review` pick provider (opencode, claude or codex), model and thinking level (saved per user; defaults in `config/models.env`). The reviewer's provider is `auto` (the other vendor of the host) unless the user forces one. Do not hardcode ids here; read them from `models`.
 
-If your own session is not running the orchestrator model and effort above, tell the user once and suggest a relaunch, then continue if they say so:
-- `claude --model claude-opus-5-5 --effort medium`
-- `codex -m gpt-6.1-sol -c model_reasoning_effort="medium"`
+The orchestrator is you, on whatever model the harness has selected; never ask the user to relaunch or switch models. To change the developer or reviewer from chat, the user can invoke the `orchestrator-models` skill.
 
 **Codex host:** the delegate scripts need network access and write to `~/.claude` and `~/.local/share/opencode`. Request escalated permissions (outside the sandbox) when running them, and use a long timeout.
 

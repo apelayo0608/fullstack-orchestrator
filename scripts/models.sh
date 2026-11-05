@@ -6,8 +6,8 @@
 #        fullstack-orchestrator models set <role|role-field> [<value>]
 #        fullstack-orchestrator models reset [<role|role-field>]
 #
-# Roles: dev, review, orch-claude, orch-codex. Each has a model; dev and review also have a
-# provider (runner: opencode, claude or codex); every role has a thinking level.
+# Roles: dev and review. Each has a provider (runner: opencode, claude or codex), a model and
+# a thinking level. The orchestrator is the host session on whatever model the harness runs.
 #   set dev                      pick provider, model and thinking level interactively
 #   set dev <provider/model>     e.g. opencode-go/deepseek-v4.1-flash (a #variant pins the thinking)
 #   set dev-runner <opencode|claude|codex>
@@ -17,18 +17,14 @@
 #   set review-runner <auto|opencode|claude|codex>   auto = the other vendor of the host
 #   set review <model>           empty by default: auto uses the per-host defaults below
 #   set review-effort <level>    round 1 / risk high;  review-effort-low;  review-effort-delta
-#   set orch-claude <model>, orch-claude-effort <level>   (same for orch-codex)
 #   set review-on-claude / review-on-codex [-effort|-effort-low]   per-host auto defaults
 #
 # Choices are saved to ~/.config/fullstack-orchestrator/models.env (or
 # $XDG_CONFIG_HOME, or $ORCH_CONFIG_FILE), so they survive a reinstall. Variables
-# exported in the shell still win. The orchestrator is the host session itself:
-# launch it with the model shown here (claude --model ..., codex -m ...).
+# exported in the shell still win.
 set -euo pipefail
 # shellcheck source=lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
-
-roles=(dev review orch-claude orch-codex)
 
 role_var() {
   case "$1" in
@@ -41,10 +37,6 @@ role_var() {
     review-effort) echo ORCH_REVIEW_EFFORT ;;
     review-effort-low) echo ORCH_REVIEW_EFFORT_LOW ;;
     review-effort-delta) echo ORCH_REVIEW_EFFORT_DELTA ;;
-    orch-claude) echo ORCH_ORCHESTRATOR_MODEL_CLAUDE ;;
-    orch-claude-effort) echo ORCH_ORCHESTRATOR_EFFORT_CLAUDE ;;
-    orch-codex) echo ORCH_ORCHESTRATOR_MODEL_CODEX ;;
-    orch-codex-effort) echo ORCH_ORCHESTRATOR_EFFORT_CODEX ;;
     review-on-claude) echo ORCH_REVIEW_MODEL_ON_CLAUDE ;;
     review-on-claude-effort) echo ORCH_REVIEW_EFFORT_ON_CLAUDE ;;
     review-on-claude-effort-low) echo ORCH_REVIEW_EFFORT_LOW_ON_CLAUDE ;;
@@ -201,32 +193,21 @@ do_show() {
     printf '%-22s %-9s %-26s %s\n' "review (host $host)" "$REV_RUNNER" "$REV_MODEL" \
       "${n:-default}; risk low: ${lo:-default}; later rounds: ${de:-default}"
   done
-  printf '%-22s %-9s %-26s %s\n' orch-claude claude "$ORCH_ORCHESTRATOR_MODEL_CLAUDE" "$ORCH_ORCHESTRATOR_EFFORT_CLAUDE"
-  printf '%-22s %-9s %-26s %s\n' orch-codex codex "$ORCH_ORCHESTRATOR_MODEL_CODEX" "$ORCH_ORCHESTRATOR_EFFORT_CODEX"
+  printf '%-22s %-9s %-26s %s\n' orchestrator host "(this session's model)" "(set in the harness)"
   echo
   echo "Config: $ORCH_USER_CONFIG$([[ -f $ORCH_USER_CONFIG ]] || echo ' (not created yet)')"
   echo "Change: fullstack-orchestrator models set <dev|review>   (interactive: provider, model, thinking)"
   echo "        fullstack-orchestrator models set <role>-runner|-effort <value>   (see 'models --help')"
-  echo "Launch the orchestrator with:"
-  echo "  claude --model $ORCH_ORCHESTRATOR_MODEL_CLAUDE --effort $ORCH_ORCHESTRATOR_EFFORT_CLAUDE"
-  echo "  codex -m $ORCH_ORCHESTRATOR_MODEL_CODEX -c model_reasoning_effort=\"$ORCH_ORCHESTRATOR_EFFORT_CODEX\""
+  echo "From inside a session: invoke the orchestrator-models skill."
 }
 
 do_setup() {
-  local r var ans evar
+  local r
   [[ -t 0 ]] || die "setup is interactive; use 'models set <role> <value>' instead"
   echo "Press Enter to keep the current value."
   for r in dev review; do
     echo; echo "== $r =="
     pick_model "$r"; apply_pick "$r"
-  done
-  for r in orch-claude orch-codex; do
-    var="$(role_var "$r")"; evar="$(role_var "$r-effort")"
-    echo; echo "== $r (the host session itself) =="
-    read -r -p "$r model [${!var}]: " ans
-    if [[ -n $ans ]]; then check_value "$ans"; write_var "$var" "$ans"; fi
-    choose "thinking" "${!evar}" low medium high xhigh max
-    if [[ $CHOICE != "${!evar}" ]]; then check_value "$CHOICE"; write_var "$evar" "$CHOICE"; fi
   done
   echo; bash "$0" show
 }

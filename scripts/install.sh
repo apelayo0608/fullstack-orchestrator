@@ -26,6 +26,8 @@ while [[ -L $src ]]; do
 done
 SKILL_DIR="$(cd -P "$(dirname "$src")/.." && pwd)"
 NAME=fullstack-orchestrator
+# Every skill this package installs, as name:source-dir.
+skills=("$NAME:$SKILL_DIR" "orchestrator-models:$SKILL_DIR/skills/orchestrator-models")
 
 # Model routing has its own script: fullstack-orchestrator models [show|setup|set|reset]
 if [[ ${1:-} == models ]]; then shift; exec bash "$SKILL_DIR/scripts/models.sh" "$@"; fi
@@ -63,35 +65,36 @@ skills_dir() {
   esac
 }
 
-# True when $1 is a link to, or a copy of, this skill.
+# is_ours <dest> <name>: true when <dest> is a link to, or a copy of, skill <name>.
 is_ours() {
   [[ -L $1 ]] && return 0
-  [[ -f $1/SKILL.md ]] && grep -q "^name: $NAME\$" "$1/SKILL.md"
+  [[ -f $1/SKILL.md ]] && grep -q "^name: $2\$" "$1/SKILL.md"
 }
 
+# install_host <host> <name> <source-dir>
 install_host() {
-  local dest
-  dest="$(skills_dir "$1")/$NAME"
+  local dest name=$2 from=$3
+  dest="$(skills_dir "$1")/$name"
   mkdir -p "$(dirname "$dest")"
   if [[ -e $dest || -L $dest ]]; then
-    is_ours "$dest" || { echo "  ! $dest exists and is not this skill; leaving it alone" >&2; return 1; }
+    is_ours "$dest" "$name" || { echo "  ! $dest exists and is not this skill; leaving it alone" >&2; return 1; }
     rm -rf "$dest"
   fi
   if (( copy )); then
     mkdir -p "$dest"
-    (cd "$SKILL_DIR" && tar --exclude node_modules --exclude .git -cf - .) | (cd "$dest" && tar -xf -)
+    (cd "$from" && tar --exclude node_modules --exclude .git -cf - .) | (cd "$dest" && tar -xf -)
     echo "  ✓ $1: copied to $dest"
   else
-    ln -s "$SKILL_DIR" "$dest"
-    echo "  ✓ $1: $dest -> $SKILL_DIR"
+    ln -s "$from" "$dest"
+    echo "  ✓ $1: $dest -> $from"
   fi
 }
 
 uninstall_host() {
   local dest
-  dest="$(skills_dir "$1")/$NAME"
-  if [[ ! -e $dest && ! -L $dest ]]; then echo "  - $1: not installed"; return 0; fi
-  is_ours "$dest" || { echo "  ! $dest is not this skill; leaving it alone" >&2; return 1; }
+  dest="$(skills_dir "$1")/$2"
+  if [[ ! -e $dest && ! -L $dest ]]; then echo "  - $1: $2 not installed"; return 0; fi
+  is_ours "$dest" "$2" || { echo "  ! $dest is not this skill; leaving it alone" >&2; return 1; }
   rm -rf "$dest"
   echo "  ✓ $1: removed $dest"
 }
@@ -102,13 +105,14 @@ case "$cmd" in
   install)
     chmod +x "$SKILL_DIR"/scripts/*.sh
     echo "Installing $NAME from $SKILL_DIR"
-    for h in "${hosts[@]}"; do install_host "$h"; done
+    for h in "${hosts[@]}"; do for s in "${skills[@]}"; do install_host "$h" "${s%%:*}" "${s#*:}"; done; done
     echo "Done. Start a new session and invoke $NAME (Claude/Cursor/Qoder: /$NAME, Codex: \$$NAME)."
+    echo "Change the developer or reviewer from a session with /orchestrator-models (Codex: \$orchestrator-models)."
     echo "Check your setup any time with: fullstack-orchestrator doctor  (or npm run doctor)"
     ;;
   uninstall)
     echo "Uninstalling $NAME"
-    for h in "${hosts[@]}"; do uninstall_host "$h"; done
+    for h in "${hosts[@]}"; do for s in "${skills[@]}"; do uninstall_host "$h" "${s%%:*}"; done; done
     ;;
   doctor)
     fail=0
@@ -116,10 +120,10 @@ case "$cmd" in
     check git "required"; check opencode "developer"; check codex "GPT reviewer / Codex host"
     check claude "Opus reviewer / Claude host"; check perl "log cleanup"; command -v shasum >/dev/null 2>&1 || check sha256sum "session ids"
     echo "Links:"
-    for h in "${all_hosts[@]}"; do
-      dest="$(skills_dir "$h")/$NAME"
-      if is_ours "$dest" 2>/dev/null; then echo "  ✓ $h: $dest"; else echo "  ✗ $h: not installed (run install)"; fail=1; fi
-    done
+    for h in "${all_hosts[@]}"; do for s in "${skills[@]}"; do
+      dest="$(skills_dir "$h")/${s%%:*}"
+      if is_ours "$dest" "${s%%:*}" 2>/dev/null; then echo "  ✓ $h: $dest"; else echo "  ✗ $h: ${s%%:*} not installed (run install)"; fail=1; fi
+    done; done
     # shellcheck source=lib.sh
     source "$SKILL_DIR/scripts/lib.sh"
     echo "Roles: developer $ORCH_DEV_RUNNER, reviewer $ORCH_REVIEW_RUNNER (fullstack-orchestrator models)"
