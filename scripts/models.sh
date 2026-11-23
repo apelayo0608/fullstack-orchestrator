@@ -6,29 +6,30 @@
 #        fullstack-orchestrator models set <role|role-field> [<value>]
 #        fullstack-orchestrator models reset [<role|role-field>]
 #
-# Roles: dev, review, orch-claude, orch-codex. Each has a model; dev and review also have a
-# provider (runner: opencode, claude or codex); every role has a thinking level.
+# Roles: dev, review, orch-claude, orch-codex, orch-antigravity. Each has a model; dev and review also have a
+# provider (runner: opencode, claude, codex or antigravity); every role has a thinking level.
 #   set dev                      pick provider, model and thinking level interactively
 #   set dev <provider/model>     e.g. opencode-go/deepseek-v4.1-flash (a #variant pins the thinking)
-#   set dev-runner <opencode|claude|codex>
+#   set dev-runner <opencode|claude|codex|antigravity>
 #   set dev-effort <level>       thinking level for tasks with risk low/none
 #   set dev-effort-high-risk <level>   thinking level for risk: high tasks (default max)
 #   set review                   pick provider, model and thinking level interactively
-#   set review-runner <auto|opencode|claude|codex>   auto = the other vendor of the host
+#   set review-runner <auto|opencode|claude|codex|antigravity>   auto = the other vendor of the host
 #   set review <model>           empty by default: auto uses the per-host defaults below
 #   set review-effort <level>    round 1 / risk high;  review-effort-low;  review-effort-delta
-#   set orch-claude <model>, orch-claude-effort <level>   (same for orch-codex)
-#   set review-on-claude / review-on-codex [-effort|-effort-low]   per-host auto defaults
+#   set orch-claude <model>, orch-claude-effort <level>   (same for orch-codex, orch-antigravity)
+#   set review-on-claude / review-on-codex / review-on-antigravity [-effort|-effort-low]
+#                                per-host auto defaults (review-on-antigravity-runner too)
 #
 # Choices are saved to ~/.config/fullstack-orchestrator/models.env (or
 # $XDG_CONFIG_HOME, or $ORCH_CONFIG_FILE), so they survive a reinstall. Variables
 # exported in the shell still win. The orchestrator is the host session itself:
-# launch it with the model shown here (claude --model ..., codex -m ...).
+# launch it with the model shown here (claude --model ..., codex -m ..., agy --model ...).
 set -euo pipefail
 # shellcheck source=lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
-roles=(dev review orch-claude orch-codex)
+roles=(dev review orch-claude orch-codex orch-antigravity)
 
 role_var() {
   case "$1" in
@@ -45,12 +46,18 @@ role_var() {
     orch-claude-effort) echo ORCH_ORCHESTRATOR_EFFORT_CLAUDE ;;
     orch-codex) echo ORCH_ORCHESTRATOR_MODEL_CODEX ;;
     orch-codex-effort) echo ORCH_ORCHESTRATOR_EFFORT_CODEX ;;
+    orch-antigravity) echo ORCH_ORCHESTRATOR_MODEL_ANTIGRAVITY ;;
+    orch-antigravity-effort) echo ORCH_ORCHESTRATOR_EFFORT_ANTIGRAVITY ;;
     review-on-claude) echo ORCH_REVIEW_MODEL_ON_CLAUDE ;;
     review-on-claude-effort) echo ORCH_REVIEW_EFFORT_ON_CLAUDE ;;
     review-on-claude-effort-low) echo ORCH_REVIEW_EFFORT_LOW_ON_CLAUDE ;;
     review-on-codex) echo ORCH_REVIEW_MODEL_ON_CODEX ;;
     review-on-codex-effort) echo ORCH_REVIEW_EFFORT_ON_CODEX ;;
     review-on-codex-effort-low) echo ORCH_REVIEW_EFFORT_LOW_ON_CODEX ;;
+    review-on-antigravity) echo ORCH_REVIEW_MODEL_ON_ANTIGRAVITY ;;
+    review-on-antigravity-runner) echo ORCH_REVIEW_RUNNER_ON_ANTIGRAVITY ;;
+    review-on-antigravity-effort) echo ORCH_REVIEW_EFFORT_ON_ANTIGRAVITY ;;
+    review-on-antigravity-effort-low) echo ORCH_REVIEW_EFFORT_LOW_ON_ANTIGRAVITY ;;
     *) die "unknown role '$1' (see --help)" ;;
   esac
 }
@@ -84,7 +91,7 @@ choose() {
 # pick_model <role>: provider (runner), then model, then thinking level. Sets PICK_RUNNER,
 # PICK_MODEL, PICK_EFFORT. For opencode the provider and model come from `opencode models`.
 pick_model() {
-  local role=$1 cur_runner cur_model cur_effort runners=(opencode claude codex)
+  local role=$1 cur_runner cur_model cur_effort runners=(opencode claude codex antigravity)
   [[ -t 0 ]] || die "picking is interactive; use 'models set $role <model>' and '$role-runner'"
   if [[ $role == dev ]]; then
     cur_runner=$ORCH_DEV_RUNNER; cur_model=${ORCH_DEV_MODEL%%#*}; cur_effort=$ORCH_DEV_EFFORT
@@ -119,6 +126,14 @@ pick_model() {
   else
     local suggestions=(claude-opus-5-5 claude-sonnet-5-5 claude-haiku-4-5-20251001)
     [[ $PICK_RUNNER == codex ]] && suggestions=(gpt-6.1-sol gpt-6.1-luna)
+    if [[ $PICK_RUNNER == antigravity ]]; then
+      require_cmd agy
+      # Base ids (gemini-4-argon-high -> gemini-4-argon): the thinking level is picked next.
+      suggestions=()
+      while IFS= read -r l; do suggestions+=("$l"); done < <(agy models 2>/dev/null | cut -f1 \
+        | grep -v '^Fetching' | sed -E 's/-(low|medium|high|xhigh|max)$//' | awk 'NF && !seen[$0]++')
+      (( ${#suggestions[@]} )) || suggestions=(gemini-4-argon gemini-4-neon gemini-3.8-flash)
+    fi
     echo "Models for $PICK_RUNNER (type any id):" >&2
     choose "model" "$cur_model" "${suggestions[@]}"
     PICK_MODEL=$CHOICE
@@ -166,7 +181,7 @@ do_set() {
   var="$(role_var "$role")"
   check_value "$value"
   case "$role" in
-    dev-runner) check_runner "$value" ;;
+    dev-runner|review-on-antigravity-runner) check_runner "$value" ;;
     review-runner) [[ $value == auto ]] || check_runner "$value" ;;
     dev) if [[ $ORCH_DEV_RUNNER == opencode ]]; then warn_unlisted "$value"; fi ;;
     review) if [[ $ORCH_REVIEW_RUNNER == opencode ]]; then warn_unlisted "$value"; fi ;;
@@ -190,19 +205,20 @@ do_reset() {
 
 do_show() {
   local host n lo de think
-  printf '%-22s %-9s %-26s %s\n' ROLE PROVIDER MODEL THINKING
+  printf '%-26s %-11s %-26s %s\n' ROLE PROVIDER MODEL THINKING
   if [[ $ORCH_DEV_MODEL == *'#'* ]]; then think="${ORCH_DEV_MODEL#*#} (pinned in the model id)"
   else think="$ORCH_DEV_EFFORT; risk high: $ORCH_DEV_EFFORT_HIGH_RISK"; fi
-  printf '%-22s %-9s %-26s %s\n' dev "$ORCH_DEV_RUNNER" "${ORCH_DEV_MODEL%%#*}" "$think"
-  for host in claude codex; do
+  printf '%-26s %-11s %-26s %s\n' dev "$ORCH_DEV_RUNNER" "${ORCH_DEV_MODEL%%#*}" "$think"
+  for host in claude codex antigravity; do
     resolve_review "$host" high full; n=$REV_EFFORT
     resolve_review "$host" low full; lo=$REV_EFFORT
     resolve_review "$host" high delta; de=$REV_EFFORT
-    printf '%-22s %-9s %-26s %s\n' "review (host $host)" "$REV_RUNNER" "$REV_MODEL" \
+    printf '%-26s %-11s %-26s %s\n' "review (host $host)" "$REV_RUNNER" "$REV_MODEL" \
       "${n:-default}; risk low: ${lo:-default}; later rounds: ${de:-default}"
   done
-  printf '%-22s %-9s %-26s %s\n' orch-claude claude "$ORCH_ORCHESTRATOR_MODEL_CLAUDE" "$ORCH_ORCHESTRATOR_EFFORT_CLAUDE"
-  printf '%-22s %-9s %-26s %s\n' orch-codex codex "$ORCH_ORCHESTRATOR_MODEL_CODEX" "$ORCH_ORCHESTRATOR_EFFORT_CODEX"
+  printf '%-26s %-11s %-26s %s\n' orch-claude claude "$ORCH_ORCHESTRATOR_MODEL_CLAUDE" "$ORCH_ORCHESTRATOR_EFFORT_CLAUDE"
+  printf '%-26s %-11s %-26s %s\n' orch-codex codex "$ORCH_ORCHESTRATOR_MODEL_CODEX" "$ORCH_ORCHESTRATOR_EFFORT_CODEX"
+  printf '%-26s %-11s %-26s %s\n' orch-antigravity antigravity "$ORCH_ORCHESTRATOR_MODEL_ANTIGRAVITY" "$ORCH_ORCHESTRATOR_EFFORT_ANTIGRAVITY"
   echo
   echo "Config: $ORCH_USER_CONFIG$([[ -f $ORCH_USER_CONFIG ]] || echo ' (not created yet)')"
   echo "Change: fullstack-orchestrator models set <dev|review>   (interactive: provider, model, thinking)"
@@ -210,6 +226,7 @@ do_show() {
   echo "Launch the orchestrator with:"
   echo "  claude --model $ORCH_ORCHESTRATOR_MODEL_CLAUDE --effort $ORCH_ORCHESTRATOR_EFFORT_CLAUDE"
   echo "  codex -m $ORCH_ORCHESTRATOR_MODEL_CODEX -c model_reasoning_effort=\"$ORCH_ORCHESTRATOR_EFFORT_CODEX\""
+  echo "  agy --model $ORCH_ORCHESTRATOR_MODEL_ANTIGRAVITY --effort $ORCH_ORCHESTRATOR_EFFORT_ANTIGRAVITY"
 }
 
 do_setup() {
@@ -220,7 +237,7 @@ do_setup() {
     echo; echo "== $r =="
     pick_model "$r"; apply_pick "$r"
   done
-  for r in orch-claude orch-codex; do
+  for r in orch-claude orch-codex orch-antigravity; do
     var="$(role_var "$r")"; evar="$(role_var "$r-effort")"
     echo; echo "== $r (the host session itself) =="
     read -r -p "$r model [${!var}]: " ans

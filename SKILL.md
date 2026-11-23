@@ -1,6 +1,6 @@
 ---
 name: fullstack-orchestrator
-description: Plan-and-delegate orchestration for full-stack web apps. The orchestrator (Claude Opus 5.5 or GPT 6.1 Sol) only plans, briefs, triages and verifies; a configurable developer model (default via OpenCode) writes all code; the other vendor's model (GPT 6.1 Sol under Claude, Opus 5.5 under Codex) reviews read-only. Enforces React/Vite (or Next) + Express + PostgreSQL + Zustand/TanStack Query + Clean Architecture + MFA (email OTP and TOTP) + Tailwind + Motion, with AES-256-GCM field encryption and IDOR protection by default. Use when the user invokes fullstack-orchestrator, or asks to build, add a feature to, or fix a web app (React/Vite/Next, Express, Postgres or similar). Unless invoked by name, it first asks the user whether to use the orchestrated team or the current agent alone.
+description: Plan-and-delegate orchestration for full-stack web apps. The orchestrator (Claude Opus 5.5, GPT 6.1 Sol, or Gemini 4 Argon in Antigravity) only plans, briefs, triages and verifies; a configurable developer model (default via OpenCode) writes all code; the other vendor's model (GPT 6.1 Sol under Claude, Opus 5.5 under Codex or Antigravity) reviews read-only. Enforces React/Vite (or Next) + Express + PostgreSQL + Zustand/TanStack Query + Clean Architecture + MFA (email OTP and TOTP) + Tailwind + Motion, with AES-256-GCM field encryption and IDOR protection by default. Use when the user invokes fullstack-orchestrator, or asks to build, add a feature to, or fix a web app (React/Vite/Next, Express, Postgres or similar). Unless invoked by name, it first asks the user whether to use the orchestrated team or the current agent alone.
 ---
 
 # Fullstack Orchestrator
@@ -11,7 +11,7 @@ This step is mandatory. Do it before reading references, running scripts or writ
 
 Skip it and go straight to §1 only if one of these is true:
 - **The user's own message** names the skill (`/fullstack-orchestrator`, `$fullstack-orchestrator`, "use fullstack-orchestrator", "use the orchestrator"). If you loaded this skill yourself because the request looked like full-stack work, that does **not** count. Ask.
-- The project's instruction file (`CLAUDE.md`, `AGENTS.md`, Cursor/Qoder rules) says to always use it.
+- The project's instruction file (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, Cursor/Qoder/Antigravity rules) says to always use it.
 - The user already answered this question earlier in the conversation.
 
 Otherwise the skill was triggered automatically. **Before any planning or edits, ask one question.** Use the host's question tool if it has one (e.g. AskUserQuestion); otherwise ask in chat and wait for the answer:
@@ -41,19 +41,24 @@ Run `scripts/detect-host.sh`. You also know which agent you are. If detection fa
 |---|---|---|---|
 | **Claude Code** (`--host claude`) | Claude Opus 5.5, effort medium | `ORCH_DEV_RUNNER` / `ORCH_DEV_MODEL` (default OpenCode), thinking high, max for `risk: high` | GPT 6.1 Sol, effort medium, via `codex exec -s read-only` (default) |
 | **Codex** (`--host codex`) | GPT 6.1 Sol, effort medium | same developer | Claude Opus 5.5, effort medium, via `claude -p` with edit tools denied (default) |
+| **Antigravity** (`--host antigravity`) | Gemini 4 Argon, effort medium | same developer | Claude Opus 5.5, effort medium, via `claude -p` (default; `models set review-on-antigravity-runner` changes it) |
 
 **Other tools (Cursor, Qoder, …):** `detect-host.sh` can't identify them, so choose `--host` by the model *you* are running as. The reviewer is always the other vendor:
 - A Claude model → `--host claude` (GPT reviews).
 - A GPT model → `--host codex` (Opus reviews).
-- Any other model → ask the user which reviewer to use.
+- A Gemini model → `--host antigravity` (Opus reviews).
+- Any other model → ask the user which reviewer to use, then pass the matching `--host`.
 
 The scripts are plain shell, so they run in any agent that has a terminal. If that agent's sandbox blocks network access, the user must allow the delegate scripts to run outside it.
 
-Every role has a provider, a model and a thinking level, and the user can change each: `fullstack-orchestrator models` shows them, `models set dev` / `models set review` pick provider (opencode, claude or codex), model and thinking level (saved per user; defaults in `config/models.env`). The reviewer's provider is `auto` (the other vendor of the host) unless the user forces one. Do not hardcode ids here; read them from `models`.
+Every role has a provider, a model and a thinking level, and the user can change each: `fullstack-orchestrator models` shows them, `models set dev` / `models set review` pick provider (opencode, claude, codex or antigravity), model and thinking level (saved per user; defaults in `config/models.env`). The reviewer's provider is `auto` (the other vendor of the host) unless the user forces one. Do not hardcode ids here; read them from `models`.
 
 If your own session is not running the orchestrator model and effort above, tell the user once and suggest a relaunch, then continue if they say so:
 - `claude --model claude-opus-5-5 --effort medium`
 - `codex -m gpt-6.1-sol -c model_reasoning_effort="medium"`
+- `agy --model gemini-4-argon --effort medium`
+
+**Antigravity host:** the delegate scripts run for many minutes. Run them as background terminal commands (or with no timeout) and check back on them; approve them when Antigravity asks, or allow `delegate-dev.sh` and `delegate-review.sh` in its permission rules. Never use `--dangerously-skip-permissions` for the orchestrator itself: you only plan and delegate.
 
 **Codex host:** the delegate scripts need network access and write to `~/.claude` and `~/.local/share/opencode`. Request escalated permissions (outside the sandbox) when running them, and use a long timeout.
 

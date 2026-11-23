@@ -1,13 +1,14 @@
 # fullstack-orchestrator
 
-A shared skill for **Claude Code** and **Codex**. It turns the host into a plan-and-delegate orchestrator for full-stack apps:
+A shared skill for **Claude Code**, **Codex** and **Antigravity**. It turns the host into a plan-and-delegate orchestrator for full-stack apps:
 
 | Host | Orchestrator | Developer | Reviewer (read-only) |
 |---|---|---|---|
 | Claude Code | Opus 5.5 · medium | configurable (default OpenCode) · high, max for risk-high tasks | GPT 6.1 Sol · medium (`codex exec -s read-only`) |
 | Codex | GPT 6.1 Sol · medium | same | Opus 5.5 · medium (`claude -p`, edit tools denied) |
+| Antigravity (`agy` or the app) | Gemini 4 Argon · medium | same | Opus 5.5 · medium (`claude -p`, edit tools denied) |
 
-Every role's **provider, model and thinking level** can be changed (see [Swap models](#swap-models)). Developer and reviewer providers can be `opencode`, `claude` or `codex`.
+Every role's **provider, model and thinking level** can be changed (see [Swap models](#swap-models)). Developer and reviewer providers can be `opencode`, `claude`, `codex` or `antigravity` (Google's Antigravity CLI, for Gemini 4).
 
 Default stack and security rules: React/Vite (or Next) · Express 5 · PostgreSQL · Vite proxy · Zustand + TanStack Query · Clean Architecture · MFA (email OTP + TOTP) · Tailwind v4 · Motion. The rules are AES-256-GCM field encryption and IDOR protection (owner-scoped data access) by default.
 
@@ -45,7 +46,9 @@ fullstack-orchestrator install
 ```
 npm blocks install scripts on global installs, so run `fullstack-orchestrator install` once yourself. After that you can use `fullstack-orchestrator doctor` and `fullstack-orchestrator uninstall`. Run `uninstall` before `npm uninstall -g fullstack-orchestrator`, because npm doesn't run uninstall hooks.
 
-**Cursor and Qoder** read the same `SKILL.md` format from `~/.cursor/skills` and `~/.qoder/skills`. The installer links into those too when `~/.cursor` or `~/.qoder` exists. To limit which tools get it, use `fullstack-orchestrator install --only=cursor,qoder` or `npm run setup -- --only=...`. In those tools the skill picks the reviewer from the orchestrator's model: Claude → GPT reviews, GPT → Opus reviews.
+**Antigravity** (the `agy` CLI and the app) loads global skills from `~/.gemini/config/skills`; the installer links there when `~/.gemini/config` exists or `agy` is on PATH. Check with `agy -p "/skills"`. `detect-host.sh` recognises Antigravity by its `ANTIGRAVITY_*` variables.
+
+**Cursor and Qoder** read the same `SKILL.md` format from `~/.cursor/skills` and `~/.qoder/skills`. The installer links into those too when `~/.cursor` or `~/.qoder` exists. To limit which tools get it, use `fullstack-orchestrator install --only=cursor,qoder,antigravity` or `npm run setup -- --only=...`. In those tools the skill picks the reviewer from the orchestrator's model: Claude → GPT reviews, GPT → Opus reviews.
 
 Requirements: `opencode` (logged in to the `opencode-go` provider), `codex`, `claude`, `git`, `perl`, and `shasum` on PATH.
 
@@ -57,7 +60,10 @@ claude --model claude-opus-5-5 --effort medium
 ```bash
 codex -m gpt-6.1-sol -c model_reasoning_effort="medium"
 ```
-Then ask for the work, or invoke it explicitly: `/fullstack-orchestrator …` in Claude Code, `$fullstack-orchestrator …` in Codex.
+```bash
+agy --model gemini-4-argon --effort medium
+```
+Then ask for the work, or invoke it explicitly: `/fullstack-orchestrator …` in Claude Code and Antigravity, `$fullstack-orchestrator …` in Codex.
 
 ### Codex sandbox
 Codex's default sandbox blocks network access and writes outside the workspace. The delegate scripts need both: they call OpenCode and Claude, which write to `~/.local/share/opencode` and `~/.claude`. Codex will ask to run them with escalated permissions. To stop being asked every time, you can add allow rules to `~/.codex/rules/default.rules` yourself:
@@ -74,7 +80,7 @@ fullstack-orchestrator models                 # show provider, model and thinkin
 fullstack-orchestrator models setup           # interactive for every role; Enter keeps a value
 fullstack-orchestrator models set dev         # pick provider, then model, then thinking level
 fullstack-orchestrator models set review      # same for the reviewer ("auto" = the other vendor of the host)
-fullstack-orchestrator models set dev-runner claude       # provider: opencode | claude | codex
+fullstack-orchestrator models set dev-runner claude       # provider: opencode | claude | codex | antigravity
 fullstack-orchestrator models set dev opencode-go/deepseek-v4-pro
 fullstack-orchestrator models set dev-effort medium       # risk low/none tasks
 fullstack-orchestrator models set dev-effort-high-risk max
@@ -87,11 +93,27 @@ fullstack-orchestrator models reset [role]    # back to the defaults
 
 | Role | Provider | Model | Thinking |
 |---|---|---|---|
-| Developer | `dev-runner` (opencode, claude, codex) | `dev` | `dev-effort`, `dev-effort-high-risk` (a `#variant` on the model id pins it for all tasks) |
-| Reviewer | `review-runner` (auto, opencode, claude, codex) | `review` (empty = per-host default) | `review-effort`, `review-effort-low`, `review-effort-delta` |
-| Orchestrator | the host: Claude Code or Codex | `orch-claude`, `orch-codex` | `orch-claude-effort`, `orch-codex-effort` |
+| Developer | `dev-runner` (opencode, claude, codex, antigravity) | `dev` | `dev-effort`, `dev-effort-high-risk` (a `#variant` on the model id pins it for all tasks) |
+| Reviewer | `review-runner` (auto, opencode, claude, codex, antigravity) | `review` (empty = per-host default) | `review-effort`, `review-effort-low`, `review-effort-delta` |
+| Orchestrator | the host: Claude Code, Codex or Antigravity | `orch-claude`, `orch-codex`, `orch-antigravity` | `orch-claude-effort`, `orch-codex-effort`, `orch-antigravity-effort` |
 
-Per-host reviewer defaults used while the runner is `auto` and `review` is empty: `review-on-claude`, `review-on-codex` (and their `-effort`, `-effort-low`). Choices are saved to `~/.config/fullstack-orchestrator/models.env`, so reinstalling does not lose them. `set dev` warns when OpenCode does not list the model. The `codex` developer has no resumable session, so it gets the full contract on every run; `claude` and `opencode` resume and get a short prompt on fix rounds. The orchestrator is your host session: launch it with the model `models` prints. To override once, export a variable, e.g. `ORCH_DEV_MODEL=... claude`. Defaults live in `config/models.env`; change them there only for the repo itself.
+Per-host reviewer defaults used while the runner is `auto` and `review` is empty: `review-on-claude`, `review-on-codex`, `review-on-antigravity` (and their `-effort`, `-effort-low`; `review-on-antigravity-runner` picks its provider, default `claude`). Choices are saved to `~/.config/fullstack-orchestrator/models.env`, so reinstalling does not lose them. `set dev` warns when OpenCode does not list the model. The `codex` developer has no resumable session, so it gets the full contract on every run; `claude`, `opencode` and `antigravity` resume and get a short prompt on fix rounds. The orchestrator is your host session: launch it with the model `models` prints. To override once, export a variable, e.g. `ORCH_DEV_MODEL=... claude`. Defaults live in `config/models.env`; change them there only for the repo itself.
+
+### Google (Gemini) as developer or reviewer
+Google's models run through the Antigravity CLI (`agy`), which replaced the Gemini CLI for unpaid and Google One accounts and is the only way to use Gemini 4 Argon. Install Antigravity, sign in once, and check `agy models`. Then:
+```bash
+fullstack-orchestrator models set dev-runner antigravity
+```
+```bash
+fullstack-orchestrator models set dev gemini-4-argon
+```
+```bash
+fullstack-orchestrator models set review-runner antigravity
+```
+```bash
+fullstack-orchestrator models set review gemini-4-argon
+```
+Or run `models set dev` / `models set review` to pick from what `agy models` lists. Thinking levels map to `agy --effort`; a model id that already ends in a level (`gemini-4-argon-high`) pins it. The developer runs `agy -p --dangerously-skip-permissions` and resumes its conversation on fix rounds. The reviewer runs in Default agent mode (not Auto) with `request-review`: it can read and search the workspace and run only `git diff/log/show/status/ls-files/blame`, and every edit is denied; the working-tree guard still checks it changed nothing. If headless `agy` hits a denied action it ends the turn with no answer; the review file then says which action was denied.
 
 ## What happens in a project
 

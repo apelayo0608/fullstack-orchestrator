@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 # Send a task's diff to the read-only reviewer from the other vendor.
 #
-# Usage: delegate-review.sh --task T01 [--brief PATH] [--host claude|codex] [--risk high|low|none]
+# Usage: delegate-review.sh --task T01 [--brief PATH] [--host claude|codex|antigravity] [--risk high|low|none]
 #                           [--full] [--skip-checks] [--repo DIR] [--dry-run]
 #
 #   --task         Task id already delegated with delegate-dev.sh (its baseline must exist).
 #   --brief        Brief the work is judged against (default: .orchestrator/tasks/<task>.md).
 #   --host         Who is orchestrating; only used while ORCH_REVIEW_RUNNER=auto
-#                  (Claude -> codex reviewer, Codex -> claude reviewer). Default: detect-host.sh.
+#                  (Claude -> codex reviewer, Codex or Antigravity -> claude reviewer).
+#                  Default: detect-host.sh.
 #   --risk         high: full security checklist at the normal effort (default).
 #                  low:  correctness/architecture/frontend/tests checklist at low effort.
 #                  none: no model review; records an APPROVE once the checks pass.
@@ -18,7 +19,7 @@
 #   --dry-run      Print the reviewer command without running it.
 #
 # Reviewer provider, model and thinking level come from ORCH_REVIEW_RUNNER (auto | opencode |
-# claude | codex), ORCH_REVIEW_MODEL and the ORCH_REVIEW_EFFORT* settings; see
+# claude | codex | antigravity), ORCH_REVIEW_MODEL and the ORCH_REVIEW_EFFORT* settings; see
 # `fullstack-orchestrator models`. auto = the other vendor of --host. Later rounds use
 # ORCH_REVIEW_EFFORT_DELTA (default low). A risk: low task with fewer than
 # ORCH_SKIP_REVIEW_LINES changed lines gets no model review, like risk: none.
@@ -61,7 +62,7 @@ risk="${risk:-high}"
 [[ $risk == high || $risk == low || $risk == none ]] || die "--risk must be high, low or none (got '$risk')"
 if [[ $risk != none && $ORCH_REVIEW_RUNNER == auto ]]; then
   host="${host:-$("$SCRIPT_DIR/detect-host.sh")}" || exit 1
-  [[ $host == claude || $host == codex ]] || die "--host must be claude or codex"
+  [[ $host == claude || $host == codex || $host == antigravity ]] || die "--host must be claude, codex or antigravity"
 fi
 
 round=1
@@ -96,6 +97,15 @@ build_cmd() {
     opencode)
       # The plan agent cannot edit; the working-tree guard below is the backstop.
       cmd=(opencode run -m "${REV_MODEL%%#*}" ${REV_EFFORT:+--variant "$REV_EFFORT"} --agent plan --title "orch review $task") ;;
+    antigravity)
+      # Default agent mode (not Auto) with request-review: headless agy may read and search the
+      # workspace, run only the git read commands below, and is denied every edit. The
+      # working-tree guard below is the backstop.
+      local a=(); while IFS= read -r l; do a+=("$l"); done < <(agy_args "$REV_MODEL" "$REV_EFFORT")
+      local settings='{"agentMode":"","toolPermission":"request-review","permissions":{"allow":["command(git diff)","command(git log)","command(git show)","command(git status)","command(git ls-files)","command(git blame)"]}}'
+      cmd=(agy "${a[@]}" --settings "$settings" --output-format stream-json)
+      # The diffs live in the main tree's .orchestrator/, outside a task worktree.
+      [[ $work != "$repo" ]] && cmd+=(--add-dir "$orch") ;;
   esac
   reviewer="$REV_LABEL"
 }
@@ -110,7 +120,11 @@ if (( dry_run )); then
     echo "reviewer: none (checks only)"
   else
     echo "reviewer: $reviewer"
-    echo "command:  (cd $work && ${cmd[*]} < <prompt>)"
+    case "$REV_RUNNER" in
+      opencode) echo "command:  (cd $work && ${cmd[*]} \"<prompt>\")" ;;
+      antigravity) echo "command:  (cd $work && ${cmd[*]} --print=\"<prompt>\")" ;;
+      *) echo "command:  (cd $work && ${cmd[*]} < <prompt>)" ;;
+    esac
   fi
   echo "output:   $out"
   exit 0
@@ -256,13 +270,15 @@ echo "Review round $round ($mode, risk $risk) of $task by $reviewer..." >&2
 review_once() {
   case "$REV_RUNNER" in
     codex)
-      env -u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT "${cmd[@]}" < "$prompt_file" 2>&1 | strip_ansi > "$log"
+      child_env "${cmd[@]}" < "$prompt_file" 2>&1 | strip_ansi > "$log"
       return "${PIPESTATUS[0]}" ;;
     claude)
-      (cd "$work" && env -u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT "${cmd[@]}" < "$prompt_file" > "$out.jsonl" 2> "$log") ;;
+      (cd "$work" && child_env "${cmd[@]}" < "$prompt_file" > "$out.jsonl" 2> "$log") ;;
     opencode)
-      (cd "$work" && "${cmd[@]}" "$(cat "$prompt_file")" 2> "$log" | strip_ansi > "$out")
+      (cd "$work" && child_env "${cmd[@]}" "$(cat "$prompt_file")" 2> "$log" | strip_ansi > "$out")
       return "${PIPESTATUS[0]}" ;;
+    antigravity)
+      (cd "$work" && child_env "${cmd[@]}" --print="$(cat "$prompt_file")" > "$out.jsonl" 2> "$log") ;;
   esac
 }
 tries=0
@@ -276,6 +292,7 @@ while :; do
   echo "warning: reviewer made no progress in ${ORCH_HANG_CHECK_SECS}s; killed it, restarting ($tries/$ORCH_HANG_RETRIES)..." >&2
 done
 if [[ $REV_RUNNER == claude && -f $out.jsonl ]]; then claude_result "$out.jsonl" > "$out"; rm -f "$out.jsonl"; fi
+if [[ $REV_RUNNER == antigravity && -f $out.jsonl ]]; then agy_field "$out.jsonl" response > "$out"; rm -f "$out.jsonl"; fi
 (( status == 124 )) && echo "error: reviewer hung (no progress in ${ORCH_HANG_CHECK_SECS}s) after $ORCH_HANG_RETRIES restart(s)" >&2
 
 after="$(worktree_tree "$work")"

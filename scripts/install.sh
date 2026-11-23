@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
 # Install, remove or check the fullstack-orchestrator skill for Claude Code, Codex,
-# Cursor and Qoder.
+# Cursor, Qoder and Antigravity.
 #
-# Usage: fullstack-orchestrator <install|uninstall|doctor> [--copy] [--only=claude,codex,cursor,qoder]
+# Usage: fullstack-orchestrator <install|uninstall|doctor> [--copy] [--only=claude,codex,cursor,qoder,antigravity]
 #        fullstack-orchestrator models [show|setup|set <role> [<value>]|reset]   (provider, model, thinking per role)
 #
 #   install     Link this folder into each tool's user skills folder (default command):
 #                 ~/.claude/skills  ~/.codex/skills  ~/.cursor/skills  ~/.qoder/skills
-#               Cursor and Qoder are included only when ~/.cursor or ~/.qoder exists.
+#                 ~/.gemini/config/skills (Antigravity: the agy CLI and the app)
+#               Cursor, Qoder and Antigravity are included only when ~/.cursor, ~/.qoder or
+#               ~/.gemini/config (or agy) exists.
 #   uninstall   Remove those links/copies (only if they are this skill).
 #   doctor      Check the CLIs, models and links the skill needs.
 #   --copy      Copy files instead of symlinking (re-run install after every update).
@@ -33,6 +35,7 @@ if [[ ${1:-} == models ]]; then shift; exec bash "$SKILL_DIR/scripts/models.sh" 
 hosts=(claude codex)
 [[ -d $HOME/.cursor ]] && hosts+=(cursor)
 [[ -d $HOME/.qoder ]] && hosts+=(qoder)
+{ [[ -d $HOME/.gemini/config ]] || command -v agy >/dev/null 2>&1; } && hosts+=(antigravity)
 all_hosts=("${hosts[@]}")
 
 cmd=install copy=0
@@ -47,7 +50,7 @@ for arg in "$@"; do
     --only=*)
       IFS=, read -r -a hosts <<<"${arg#--only=}"
       for h in "${hosts[@]}"; do
-        [[ $h =~ ^(claude|codex|cursor|qoder)$ ]] || { echo "unknown tool in --only: $h" >&2; exit 2; }
+        [[ $h =~ ^(claude|codex|cursor|qoder|antigravity)$ ]] || { echo "unknown tool in --only: $h" >&2; exit 2; }
       done ;;
     -h|--help|help) awk 'NR>1 && /^#/ {sub(/^# ?/, ""); print; next} NR>1 {exit}' "$src"; exit 0 ;;
     *) echo "unknown argument: $arg (see --help)" >&2; exit 2 ;;
@@ -60,6 +63,7 @@ skills_dir() {
     codex) echo "${CODEX_HOME:-$HOME/.codex}/skills" ;;
     cursor) echo "$HOME/.cursor/skills" ;;
     qoder) echo "$HOME/.qoder/skills" ;;
+    antigravity) echo "$HOME/.gemini/config/skills" ;;
   esac
 }
 
@@ -103,7 +107,7 @@ case "$cmd" in
     chmod +x "$SKILL_DIR"/scripts/*.sh
     echo "Installing $NAME from $SKILL_DIR"
     for h in "${hosts[@]}"; do install_host "$h"; done
-    echo "Done. Start a new session and invoke $NAME (Claude/Cursor/Qoder: /$NAME, Codex: \$$NAME)."
+    echo "Done. Start a new session and invoke $NAME (Claude/Cursor/Qoder/Antigravity: /$NAME, Codex: \$$NAME)."
     echo "Check your setup any time with: fullstack-orchestrator doctor  (or npm run doctor)"
     ;;
   uninstall)
@@ -124,7 +128,7 @@ case "$cmd" in
     source "$SKILL_DIR/scripts/lib.sh"
     echo "Roles: developer $ORCH_DEV_RUNNER, reviewer $ORCH_REVIEW_RUNNER (fullstack-orchestrator models)"
     for r in "$ORCH_DEV_RUNNER" "$ORCH_REVIEW_RUNNER"; do
-      [[ $r == auto || $r == opencode ]] || command -v "$r" >/dev/null 2>&1 || { echo "  ✗ runner '$r' is not on PATH"; fail=1; }
+      [[ $r == auto || $r == opencode ]] || command -v "$(runner_bin "$r")" >/dev/null 2>&1 || { echo "  ✗ runner '$r' ($(runner_bin "$r")) is not on PATH"; fail=1; }
     done
     if [[ $ORCH_DEV_RUNNER == opencode ]] && command -v opencode >/dev/null 2>&1; then
       echo "Developer model:"
