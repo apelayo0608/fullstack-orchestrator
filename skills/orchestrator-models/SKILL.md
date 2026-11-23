@@ -6,9 +6,9 @@ description: Show or change which provider, model and thinking level the fullsta
 # Orchestrator models
 
 The fullstack-orchestrator has three roles:
-- **Orchestrator:** this session, on whatever model the harness has selected right now. It is not configured here. To change it, the user switches the model in the harness (`/model` in Claude Code, the model picker in Codex, Cursor or Qoder).
-- **Developer:** writes all code. Provider `opencode`, `claude` or `codex`.
-- **Reviewer:** read-only. Provider `auto` (the other vendor of the orchestrator's model: GPT reviews under a Claude model, Opus under a GPT model), or a forced `opencode`, `claude` or `codex`.
+- **Orchestrator:** this session, on whatever model the harness has selected right now. It is not configured here. To change it, the user switches the model in the harness (`/model` in Claude Code, the model picker in Codex, Cursor or Qoder, `/model` or `--model` in Antigravity).
+- **Developer:** writes all code. Provider `opencode`, `claude`, `codex` or `antigravity` (Google's `agy` CLI: Gemini 4 and the other models `agy models` lists).
+- **Reviewer:** read-only. Provider `auto` (the other vendor of the orchestrator's model: GPT reviews under a Claude model, Opus under a GPT or Gemini model), or a forced `opencode`, `claude`, `codex` or `antigravity`.
 
 ## Script
 
@@ -19,11 +19,12 @@ Use `models.sh` from the fullstack-orchestrator skill, which is installed next t
 1. Run `bash <models.sh> show` and show the user the developer and reviewer rows. Name the orchestrator as the model you are running now.
 2. Ask which role to change: developer, reviewer or both. If the user already said, skip the question. Use the host's question tool if it has one (e.g. AskUserQuestion); otherwise ask in chat. In the questions below, make the current value the first option.
 3. For each role, ask:
-   - **Provider:** `opencode`, `claude`, `codex`. The reviewer also gets `auto`; with `auto`, skip the model and thinking questions.
+   - **Provider:** `opencode`, `claude`, `codex`, `antigravity`. The reviewer also gets `auto`; with `auto`, skip the model and thinking questions.
    - **Model:**
      - `opencode`: run `opencode models` (ids look like `provider/model`) and offer the likeliest ones. The user can type any listed id.
      - `claude`: `claude-opus-5-5`, `claude-sonnet-5-5`, `claude-haiku-4-5-20251001`.
      - `codex`: `gpt-6.1-sol`, `gpt-6.1-luna`.
+     - `antigravity`: run `agy models` and offer the likeliest ones without the level suffix (`gemini-4-argon`, `gemini-4-neon`, `gemini-3.8-flash`); the thinking level is asked next. An id that ends in a level (`gemini-4-argon-high`) pins it.
      - The user may type any other id.
    - **Thinking:** `low`, `medium`, `high`, `xhigh`, `max`. For the developer, also ask about `risk: high` tasks (default `max`) when the user wants control over it.
 4. Save with these commands. Set the provider first, because the model check depends on it:

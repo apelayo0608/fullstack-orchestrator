@@ -119,7 +119,50 @@ last_section() {
 # --- Roles: provider (runner), model and thinking level ----------------------
 
 check_runner() {
-  [[ $1 == opencode || $1 == claude || $1 == codex ]] || die "runner must be opencode, claude or codex (got '$1')"
+  [[ $1 == opencode || $1 == claude || $1 == codex || $1 == antigravity ]] || die "runner must be opencode, claude, codex or antigravity (got '$1')"
+}
+
+# child_env <cmd...>: run a developer/reviewer CLI without the host agent's session variables,
+# so a nested claude or agy starts its own session instead of attaching to the host's.
+child_env() {
+  local u=(-u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT) v
+  while IFS= read -r v; do u+=(-u "$v"); done < <(compgen -e | grep '^ANTIGRAVITY_' || true)
+  env "${u[@]}" "$@"
+}
+
+# runner_bin <runner>: the CLI a runner needs on PATH.
+runner_bin() { if [[ $1 == antigravity ]]; then echo agy; else echo "$1"; fi; }
+
+# --- Antigravity CLI (agy) ----------------------------------------------------
+# Model ids may carry the thinking level (gemini-4-argon-high); then --effort is left out.
+# agy_args <model> <effort>: prints the --model/--effort arguments, one per line.
+agy_args() {
+  local m=${1%%#*} e=$2
+  m=${m#google/}
+  [[ $1 == *'#'* ]] && e=${1#*#}
+  printf '%s\n' --model "$m"
+  [[ -n $e && ! $m =~ -(low|medium|high|xhigh|max)$ ]] && printf '%s\n' --effort "$e"
+  return 0
+}
+
+# agy_field <stream-json file> <conversation_id|response>: from agy --output-format stream-json.
+# response: the final answer; when it is empty (headless agy stops after a denied tool call),
+# the denied actions instead, so the reader sees why.
+agy_field() {
+  require_cmd node
+  node -e '
+    const [file, want] = process.argv.slice(1); let id = "", res = null; const other = [];
+    for (const l of require("fs").readFileSync(file, "utf8").split("\n")) {
+      let j; try { j = JSON.parse(l); } catch { if (l.trim()) other.push(l); continue; }
+      id = id || j.conversation_id || j.step_update?.conversation_id || j.result?.conversation_id || "";
+      if (j.event === "result") res = j.result;
+    }
+    if (want === "conversation_id") { process.stdout.write(id); process.exit(0); }
+    if (res?.response?.trim()) process.stdout.write(res.response.replace(/\n?$/, "\n"));
+    else if (res) process.stdout.write(`(agy returned no answer: status ${res.status}` +
+      (res.denied_actions?.length ? `; denied: ${JSON.stringify(res.denied_actions)}` : "") + ")\n" +
+      other.slice(-20).join("\n") + "\n");
+    else process.stdout.write(other.join("\n") + "\n");' "$1" "$2"
 }
 
 # dev_effort <risk>: the developer's thinking level. A #variant in ORCH_DEV_MODEL wins.
@@ -137,12 +180,14 @@ resolve_review() {
   REV_RUNNER=$ORCH_REVIEW_RUNNER
   if [[ $REV_RUNNER == auto ]]; then
     case "$host" in
-      claude) REV_RUNNER=codex ;;
-      codex) REV_RUNNER=claude ;;
-      *) die "cannot pick the reviewer without a host (claude or codex)" ;;
+      claude) REV_RUNNER=codex
+        d_model=$ORCH_REVIEW_MODEL_ON_CLAUDE; d_eff=$ORCH_REVIEW_EFFORT_ON_CLAUDE; d_low=$ORCH_REVIEW_EFFORT_LOW_ON_CLAUDE ;;
+      codex) REV_RUNNER=claude
+        d_model=$ORCH_REVIEW_MODEL_ON_CODEX; d_eff=$ORCH_REVIEW_EFFORT_ON_CODEX; d_low=$ORCH_REVIEW_EFFORT_LOW_ON_CODEX ;;
+      antigravity) REV_RUNNER=$ORCH_REVIEW_RUNNER_ON_ANTIGRAVITY; check_runner "$REV_RUNNER"
+        d_model=$ORCH_REVIEW_MODEL_ON_ANTIGRAVITY; d_eff=$ORCH_REVIEW_EFFORT_ON_ANTIGRAVITY; d_low=$ORCH_REVIEW_EFFORT_LOW_ON_ANTIGRAVITY ;;
+      *) die "cannot pick the reviewer without a host (claude, codex or antigravity)" ;;
     esac
-    if [[ $host == claude ]]; then d_model=$ORCH_REVIEW_MODEL_ON_CLAUDE; d_eff=$ORCH_REVIEW_EFFORT_ON_CLAUDE; d_low=$ORCH_REVIEW_EFFORT_LOW_ON_CLAUDE
-    else d_model=$ORCH_REVIEW_MODEL_ON_CODEX; d_eff=$ORCH_REVIEW_EFFORT_ON_CODEX; d_low=$ORCH_REVIEW_EFFORT_LOW_ON_CODEX; fi
   else
     check_runner "$REV_RUNNER"
     d_model="" d_eff="" d_low=""

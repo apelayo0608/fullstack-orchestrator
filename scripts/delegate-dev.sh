@@ -18,7 +18,7 @@
 #                  attaches to the same session and lets you type into it.
 #   --dry-run      Print the command and prompt location without running anything.
 #
-# Provider, model and thinking level come from ORCH_DEV_RUNNER (opencode | claude | codex),
+# Provider, model and thinking level come from ORCH_DEV_RUNNER (opencode | claude | codex | antigravity),
 # ORCH_DEV_MODEL and ORCH_DEV_EFFORT / ORCH_DEV_EFFORT_HIGH_RISK; see `fullstack-orchestrator models`.
 # Fix rounds in the same session get a short prompt (the session already holds the contract).
 #
@@ -92,9 +92,14 @@ else
   (( new_session )) && [[ $runner == opencode ]] && session="${session}_$(date +%s)"
   (( new_session )) && [[ $runner == claude ]] && session="$(uuidgen 2>/dev/null | tr 'A-Z' 'a-z' || echo "$session")"
 fi
+# Antigravity's conversation id is only known once agy starts; it is kept in <task>.agy.
+agy_file="$orch/sessions/$task.agy"
+if (( new_session )); then rm -f "$agy_file"; fi
+[[ $runner == antigravity && -s $agy_file ]] && session="$(<"$agy_file")"
 # Codex has no resumable session here, so it always needs the full contract.
 resumed=0
 [[ -f $started_file && $runner != codex ]] && (( !new_session )) && resumed=1
+[[ $runner == antigravity && ! -s $agy_file ]] && resumed=0
 
 ts="$(date +%Y%m%d-%H%M%S)"
 prompt_file="$orch/logs/$task-dev-$ts.prompt.md"
@@ -111,6 +116,11 @@ dev_cmd() {
     codex)
       cmd=(codex exec -m "$model_id" ${effort:+-c "model_reasoning_effort=\"$effort\""}
            -c 'approval_policy="never"' -s workspace-write --skip-git-repo-check -C "$work" -) ;;
+    antigravity)
+      # Headless agy: the prompt goes in --print=; every tool call is approved.
+      local a=(); while IFS= read -r l; do a+=("$l"); done < <(agy_args "$model_id" "$effort")
+      cmd=(agy "${a[@]}" --dangerously-skip-permissions --output-format stream-json)
+      if [[ -s $agy_file ]]; then cmd+=(--conversation "$(<"$agy_file")"); fi ;;
   esac
 }
 dev_cmd
@@ -137,7 +147,7 @@ if (( dry_run )); then
   exit 0
 fi
 
-[[ -n ${ORCH_DEV_CMD:-} ]] || require_cmd "$runner"
+[[ -n ${ORCH_DEV_CMD:-} ]] || require_cmd "$(runner_bin "$runner")"
 ensure_workspace "$repo"
 [[ -f "$orch/baselines/$task.tree" ]] || worktree_tree "$work" > "$orch/baselines/$task.tree"
 echo "$session" > "$session_file"
@@ -280,16 +290,26 @@ dev_once() {
   if [[ -n ${ORCH_DEV_CMD:-} ]]; then
     (cd "$work" && bash -c "$ORCH_DEV_CMD") < "$1" 2>&1 | strip_ansi > "$2"; return "${PIPESTATUS[0]}"
   elif [[ $runner == opencode ]]; then
-    (cd "$work" && "${cmd[@]}" "$(cat "$1")") 2>&1 | strip_ansi > "$2"; return "${PIPESTATUS[0]}"
+    (cd "$work" && child_env "${cmd[@]}" "$(cat "$1")") 2>&1 | strip_ansi > "$2"; return "${PIPESTATUS[0]}"
+  elif [[ $runner == antigravity ]]; then
+    (cd "$work" && child_env "${cmd[@]}" --print="$(cat "$1")") 2>&1 | strip_ansi > "$2"; return "${PIPESTATUS[0]}"
   else
-    (cd "$work" && env -u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT "${cmd[@]}" < "$1") 2>&1 | strip_ansi > "$2"; return "${PIPESTATUS[0]}"
+    (cd "$work" && child_env "${cmd[@]}" < "$1") 2>&1 | strip_ansi > "$2"; return "${PIPESTATUS[0]}"
   fi
+}
+
+# agy_save_id <raw>: remember the Antigravity conversation so fix rounds and restarts resume it.
+agy_save_id() {
+  [[ $runner == antigravity && -f $1 ]] || return 0
+  local id; id="$(agy_field "$1" conversation_id)"
+  if [[ -n $id ]]; then printf '%s\n' "$id" > "$agy_file"; session=$id; fi
+  return 0
 }
 
 # run_dev <prompt file> <log>: one developer turn in this task's session, restarted on hangs.
 run_dev() {
   local rc tries=0 raw=$2
-  [[ $runner == claude ]] && raw="$2.jsonl"
+  [[ $runner == claude || $runner == antigravity ]] && raw="$2.jsonl"
   while :; do
     dev_cmd
     set +e
@@ -303,8 +323,10 @@ run_dev() {
     if [[ $runner == claude ]] && find "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects" -name "$session.jsonl" 2>/dev/null | grep -q .; then
       touch "$started_file"
     fi
+    agy_save_id "$raw"
   done
   if [[ $runner == claude ]]; then claude_result "$raw" > "$2"; fi
+  if [[ $runner == antigravity ]]; then agy_save_id "$raw"; agy_field "$raw" response > "$2"; fi
   if (( rc == 124 )); then
     echo "error: developer hung (no progress in ${ORCH_HANG_CHECK_SECS}s) after $ORCH_HANG_RETRIES restart(s); see $2" >&2
     exit 124
