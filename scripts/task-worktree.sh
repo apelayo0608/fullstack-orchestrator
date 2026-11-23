@@ -72,7 +72,7 @@ case "$action" in
     parent=(); git -C "$main" rev-parse -q --verify HEAD >/dev/null && parent=(-p HEAD)
     snapshot="$(GIT_AUTHOR_NAME=orchestrator GIT_AUTHOR_EMAIL=orchestrator@localhost \
                 GIT_COMMITTER_NAME=orchestrator GIT_COMMITTER_EMAIL=orchestrator@localhost \
-                git -C "$main" commit-tree "$tree" "${parent[@]}" -m "orchestrator snapshot for $task")"
+                git -C "$main" commit-tree "$tree" ${parent[@]+"${parent[@]}"} -m "orchestrator snapshot for $task")"
     git -C "$main" worktree add --detach "$wt" "$snapshot" >/dev/null
     echo "$wt" > "$rec"
     # The developer's baseline is the snapshot, so the task diff starts clean.

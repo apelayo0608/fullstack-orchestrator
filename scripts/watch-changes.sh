@@ -65,7 +65,7 @@ pid_file="$orch/sessions/$task.run.pid"
 events_file="$orch/logs/$task-changes.jsonl"
 mkdir -p "$orch/logs"
 start=$(date +%s)
-declare -A prev=() first_done=0
+prev="" first_done=0
 
 # escape for JSON strings (paths and status are the only free text)
 json_escape() {
@@ -74,42 +74,35 @@ json_escape() {
   printf '%s' "$s"
 }
 
-# current_state: fills STATE[path]="status added removed" for every changed file.
+# current_state: sets STATE to one "status<TAB>added<TAB>removed<TAB>path" line per changed
+# file, sorted by path. Plain text, not an associative array: macOS ships bash 3.2.
 # It compares two tree objects (baseline vs. a snapshot of the working tree), the same
 # way check.sh does. A plain `git diff <tree>` cannot see untracked files and reports a
 # file that was untracked at baseline as a deletion, so both sides must be trees.
-declare -A STATE=()
+STATE=""
 CUR_TREE=""
 current_state() {
-  STATE=()
-  local line st p1 p2 added removed path cur
+  STATE=""
+  local cur
   cur="$(worktree_tree "$work" 2>/dev/null || true)"
   [[ -n $cur ]] || return 0
   CUR_TREE=$cur
-  declare -A letters=()
-  while IFS=$'\t' read -r st p1 p2; do
-    [[ -n $st ]] || continue
-    case "$st" in
-      R*|C*) letters["$p2"]="${st:0:1}"; letters["$p1"]="${st:0:1}" ;;
-      *)     letters["$p1"]="${st:0:1}" ;;
-    esac
-  done < <(git -C "$work" diff --name-status -M "$base" "$cur" 2>/dev/null || true)
-  while IFS=$'\t' read -r added removed path; do
-    [[ -n $path ]] || continue
-    [[ $path == .orchestrator/* ]] && continue
-    [[ $added == "-" ]] && added=0 && removed=0
-    STATE["$path"]="${letters[$path]:-M} $added $removed"
-  done < <(git -C "$work" diff --numstat --find-renames -M "$base" "$cur" 2>/dev/null || true)
+  STATE="$(awk -F'\t' '
+    FILENAME == ARGV[1] { s = substr($1, 1, 1); if ($1 ~ /^[RC]/) L[$3] = s; L[$2] = s; next }
+    $3 != "" && $3 !~ /^\.orchestrator\// {
+      a = $1; r = $2; if (a == "-") { a = 0; r = 0 }
+      print (($3 in L) ? L[$3] : "M") "\t" a "\t" r "\t" $3
+    }' \
+    <(git -C "$work" diff --name-status -M "$base" "$cur" 2>/dev/null || true) \
+    <(git -C "$work" diff --numstat --find-renames -M "$base" "$cur" 2>/dev/null || true) \
+    | sort -t "$(printf '\t')" -k4)"
 }
 
+# rows <text>: the non-empty STATE-format lines of <text>, for `while read` loops.
+rows() { [[ -z $1 ]] || printf '%s\n' "$1"; }
+
 totals() {
-  local p files=0 added=0 removed=0 a r
-  for p in "${!STATE[@]}"; do
-    files=$((files + 1))
-    read -r _ a r <<< "${STATE[$p]}"
-    added=$((added + ${a:-0})); removed=$((removed + ${r:-0}))
-  done
-  printf '%s %s %s' "$files" "$added" "$removed"
+  rows "$STATE" | awk -F'\t' '{ a += $2; r += $3 } END { printf "%d %d %d", NR, a, r }'
 }
 
 # emit_diff <path>: the hunks for one file, so the user watches the code, not just names.
@@ -120,25 +113,31 @@ emit_diff() {
 }
 
 redraw() {
-  local p files added removed elapsed
+  local s a r p files added removed elapsed color
   read -r files added removed <<< "$(totals)"
   elapsed=$(( $(date +%s) - start ))
   printf '\033[H\033[2J'
-  printf '\033[1m%s\033[0m Â· live changes Â· %02d:%02d Â· %s file(s) Â· \033[32m+%s\033[0m \033[31m-%s\033[0m\n\n' \
+  printf '\033[1m%s\033[0m · live changes · %02d:%02d · %s file(s) · \033[32m+%s\033[0m \033[31m-%s\033[0m\n\n' \
     "$task" $((elapsed / 60)) $((elapsed % 60)) "$files" "$added" "$removed"
   if (( files == 0 )); then
-    printf '  (no changes yet â€” waiting for the developer to write)\n'
+    printf '  (no changes yet — waiting for the developer to write)\n'
   else
-    for p in $(printf '%s\n' "${!STATE[@]}" | sort); do
-      local s a r mark color
-      read -r s a r <<< "${STATE[$p]}"
+    while IFS=$'\t' read -r s a r p; do
       case "$s" in
         A) color=32 ;; D) color=31 ;; R|C) color=35 ;; *) color=33 ;;
       esac
       printf '  \033[%sm%s\033[0m  %-52s \033[32m+%s\033[0m \033[31m-%s\033[0m\n' "$color" "$s" "$p" "$a" "$r"
-    done
+    done < <(rows "$STATE")
   fi
   printf '\n\033[2mCtrl-C to stop watching (the developer keeps running)\033[0m\n'
+}
+
+# json_rows <t> <text>: one JSON event per STATE-format line.
+json_rows() {
+  local t=$1 s a r p
+  while IFS=$'\t' read -r s a r p; do
+    printf '{"t":%d,"file":"%s","status":"%s","added":%s,"removed":%s}\n' "$t" "$(json_escape "$p")" "$s" "$a" "$r"
+  done < <(rows "$2")
 }
 
 restore() { [[ -t 1 ]] && printf '\033[?25h\033[0m\n' || true; }
@@ -149,68 +148,52 @@ if (( summary )); then
   current_state
   read -r files added removed <<< "$(totals)"
   echo "CHANGES: $files file(s), +$added -$removed"
-  for p in $(printf '%s\n' "${!STATE[@]}" | sort); do
-    read -r s a r <<< "${STATE[$p]}"
+  while IFS=$'\t' read -r s a r p; do
     printf '  %s %s (+%s -%s)\n' "$s" "$p" "$a" "$r"
-  done
+  done < <(rows "$STATE")
   exit 0
 fi
 
 if (( once )); then
   current_state
-  if (( json )); then
-    for p in $(printf '%s\n' "${!STATE[@]}" | sort); do
-      read -r s a r <<< "${STATE[$p]}"
-      printf '{"t":%d,"file":"%s","status":"%s","added":%s,"removed":%s}\n' \
-        $(( $(date +%s) - start )) "$(json_escape "$p")" "$s" "$a" "$r"
-    done
-  else
-    redraw
-  fi
+  if (( json )); then json_rows $(( $(date +%s) - start )) "$STATE"; else redraw; fi
   exit 0
 fi
 
 [[ -t 1 ]] && printf '\033[?25l'
-declare -A EVENT=()
 while :; do
   current_state
   now=$(( $(date +%s) - start ))
-  local_events=()
-  for p in "${!STATE[@]}"; do
-    [[ ${prev[$p]:-} == "${STATE[$p]}" ]] && continue
-    read -r s a r <<< "${STATE[$p]}"
-    EVENT["$p"]="$(printf '{"t":%d,"file":"%s","status":"%s","added":%s,"removed":%s}' \
-      "$now" "$(json_escape "$p")" "$s" "$a" "$r")"
-    printf '%s\n' "${EVENT[$p]}" >> "$events_file"
-    local_events+=("$p")
-  done
+  # Rows that are new or changed since the last poll.
+  changed="$(rows "$STATE" | awk 'FILENAME == ARGV[1] { seen[$0] = 1; next } !($0 in seen)' <(rows "$prev") -)"
+  events="$(json_rows "$now" "$changed")"
+  [[ -z $events ]] || printf '%s\n' "$events" >> "$events_file"
 
   if (( json )); then
-    for p in "${local_events[@]}"; do printf '%s\n' "${EVENT[$p]}"; done
+    rows "$events"
   elif [[ -t 1 ]]; then
     redraw
-    if (( full && first_done )); then
-      for p in "${local_events[@]}"; do
+    if (( full && first_done )) && [[ -n $changed ]]; then
+      while IFS=$'\t' read -r s a r p; do
         printf '\n\033[1m--- %s ---\033[0m\n' "$p"
         emit_diff "$p"
-      done
+      done < <(rows "$changed")
       sleep 0.2
     fi
   else
-    for p in "${local_events[@]}"; do
-      read -r s a r <<< "${STATE[$p]}"
+    while IFS=$'\t' read -r s a r p; do
       printf '[%02d:%02d] %s %s (+%s -%s)\n' $((now / 60)) $((now % 60)) "$s" "$p" "$a" "$r"
       (( full )) && emit_diff "$p" || true
-    done
+    done < <(rows "$changed")
   fi
-  for p in "${!STATE[@]}"; do prev["$p"]="${STATE[$p]}"; done
+  prev=$STATE
   first_done=1
 
   # --follow: stop once the developer run that this feed belongs to has exited.
   if (( follow )) && [[ -f $pid_file ]]; then
     if ! kill -0 "$(<"$pid_file")" 2>/dev/null; then
       current_state
-      (( json )) || (( ! json )) && { (( json )) || redraw; }
+      (( json )) || redraw
       break
     fi
   fi

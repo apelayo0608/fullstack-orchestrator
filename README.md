@@ -28,7 +28,7 @@ From a local clone of this folder:
 ```bash
 npm run setup
 ```
-That links the skill into `~/.claude/skills` and `~/.codex/skills`. Other commands:
+That links two skills into `~/.claude/skills` and `~/.codex/skills`: `fullstack-orchestrator`, and `orchestrator-models` for changing the developer and reviewer from inside a session. Other commands:
 
 | Command | What it does |
 |---|---|
@@ -50,7 +50,7 @@ npm blocks install scripts on global installs, so run `fullstack-orchestrator in
 
 **Cursor and Qoder** read the same `SKILL.md` format from `~/.cursor/skills` and `~/.qoder/skills`. The installer links into those too when `~/.cursor` or `~/.qoder` exists. To limit which tools get it, use `fullstack-orchestrator install --only=cursor,qoder,antigravity` or `npm run setup -- --only=...`. In those tools the skill picks the reviewer from the orchestrator's model: Claude → GPT reviews, GPT → Opus reviews.
 
-Requirements: `opencode` (logged in to the `opencode-go` provider), `codex`, `claude`, `git`, `perl`, and `shasum` on PATH.
+Requirements: `opencode` (logged in to the `opencode-go` provider), `codex`, `claude`, `git`, `perl`, and `shasum` or `sha256sum` on PATH. On Windows, Git Bash.
 
 ## Launch
 
@@ -87,7 +87,6 @@ fullstack-orchestrator models set dev-effort-high-risk max
 fullstack-orchestrator models set review-runner opencode  # force a provider (needs `review <model>`)
 fullstack-orchestrator models set review-effort high
 fullstack-orchestrator models set review-effort-delta low # later review rounds
-fullstack-orchestrator models set orch-claude-effort high
 fullstack-orchestrator models reset [role]    # back to the defaults
 ```
 
@@ -95,9 +94,9 @@ fullstack-orchestrator models reset [role]    # back to the defaults
 |---|---|---|---|
 | Developer | `dev-runner` (opencode, claude, codex, antigravity) | `dev` | `dev-effort`, `dev-effort-high-risk` (a `#variant` on the model id pins it for all tasks) |
 | Reviewer | `review-runner` (auto, opencode, claude, codex, antigravity) | `review` (empty = per-host default) | `review-effort`, `review-effort-low`, `review-effort-delta` |
-| Orchestrator | the host: Claude Code, Codex or Antigravity | `orch-claude`, `orch-codex`, `orch-antigravity` | `orch-claude-effort`, `orch-codex-effort`, `orch-antigravity-effort` |
+| Orchestrator | the host session | whatever model the harness has selected | set in the harness |
 
-Per-host reviewer defaults used while the runner is `auto` and `review` is empty: `review-on-claude`, `review-on-codex`, `review-on-antigravity` (and their `-effort`, `-effort-low`; `review-on-antigravity-runner` picks its provider, default `claude`). Choices are saved to `~/.config/fullstack-orchestrator/models.env`, so reinstalling does not lose them. `set dev` warns when OpenCode does not list the model. The `codex` developer has no resumable session, so it gets the full contract on every run; `claude`, `opencode` and `antigravity` resume and get a short prompt on fix rounds. The orchestrator is your host session: launch it with the model `models` prints. To override once, export a variable, e.g. `ORCH_DEV_MODEL=... claude`. Defaults live in `config/models.env`; change them there only for the repo itself.
+Per-host reviewer defaults used while the runner is `auto` and `review` is empty: `review-on-claude`, `review-on-codex`, `review-on-antigravity` (and their `-effort`, `-effort-low`; `review-on-antigravity-runner` picks its provider, default `claude`). Choices are saved to `~/.config/fullstack-orchestrator/models.env`, so reinstalling does not lose them. `set dev` warns when OpenCode does not list the model. The `codex` developer has no resumable session, so it gets the full contract on every run; `claude`, `opencode` and `antigravity` resume and get a short prompt on fix rounds. The orchestrator is your host session on whatever model it is running. From inside a session, the `orchestrator-models` skill (`/orchestrator-models`, `$orchestrator-models`) changes the developer and reviewer for you. To override once, export a variable, e.g. `ORCH_DEV_MODEL=... claude`. Defaults live in `config/models.env`; change them there only for the repo itself.
 
 ### Google (Gemini) as developer or reviewer
 Google's models run through the Antigravity CLI (`agy`), which replaced the Gemini CLI for unpaid and Google One accounts and is the only way to use Gemini 4 Argon. Install Antigravity, sign in once, and check `agy models`. Then:
