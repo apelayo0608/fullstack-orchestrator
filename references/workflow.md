@@ -168,18 +168,38 @@ Per task or at the end:
 - Anything the user must do (env vars, keys, migrations to run).
 - Residual risks.
 
-## 8. Parallel tasks (worktrees)
+## 8. Parallel work
 
-Independent tasks (their `depends` are done, they touch different files) can run at the same time, each in its own git worktree:
+Two shapes. Both are detailed in `references/parallel.md`.
+
+**Slices of one task — when there is a contract between them** (frontend + backend of the same
+feature, two independent resources). Write `.orchestrator/tasks/<task>.workers.md` with one
+`## Worker:` block per slice (brief, scope, optional env) plus the shared contract, then:
 
 ```bash
-<skill>/scripts/task-worktree.sh create --task T03     # before T03's first delegate-dev.sh
-<skill>/scripts/task-worktree.sh create --task T04
-<skill>/scripts/delegate-dev.sh --task T03             # background
-<skill>/scripts/delegate-dev.sh --task T04             # background
-<skill>/scripts/delegate-review.sh --task T03 --host <host>   # while T04 is still developing
-<skill>/scripts/task-worktree.sh land --task T03       # after APPROVE and your verification
-<skill>/scripts/task-worktree.sh remove --task T03
+<scripts>/delegate-parallel.sh --task T03 --workers .orchestrator/tasks/T03.workers.md
+```
+
+It pins every worker to the same snapshot tree, enforces disjoint scopes, runs the static checks
+per worker, merges each worker three-way into a `<task>-int` worktree, and runs the full test
+command once on the merged tree. Exit 5 = merge conflict, 6 = scope violation, 7 = a worker
+failed; each has a recovery path in the report and the reference. **Review the integration tree
+once** — never each slice separately.
+
+Never slice auth, MFA, crypto, migrations or user-owned data invariants: two agents editing the
+same invariant produce code that typechecks and is wrong.
+
+**Independent tasks.** `task-worktree.sh create` per task, then `delegate-dev.sh` per task in the
+background, reviewing one while the other develops; `land` (add `--threeway`) when approved.
+
+```bash
+<scripts>/task-worktree.sh create --task T03     # before T03's first delegate-dev.sh
+<scripts>/task-worktree.sh create --task T04
+<scripts>/delegate-dev.sh --task T03             # background
+<scripts>/delegate-dev.sh --task T04             # background
+<scripts>/delegate-review.sh --task T03 --host <host>   # while T04 is still developing
+<scripts>/task-worktree.sh land --task T03 --threeway  # after APPROVE and your verification
+<scripts>/task-worktree.sh remove --task T03
 ```
 - `create` starts the worktree from the main tree's current state, uncommitted changes included, copies ignored `.env*` files and installs dependencies from the lockfile (`ORCH_WORKTREE_SETUP` overrides; `--no-install` skips). Worktrees live in `<repo parent>/.<repo name>-orch/`.
 - `delegate-dev.sh`, `check.sh` and `delegate-review.sh` find the worktree by task id. Plans, briefs and reviews stay in the main tree's `.orchestrator/`.
